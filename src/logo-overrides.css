@@ -1,4 +1,4 @@
-/* Logo sizing overrides for public card and admin mobile preview */
+/* Logo/banner sizing overrides for public card and admin mobile preview */
 .preview-logo-wrap,
 .public-logo-wrap {
   display: flex;
@@ -8,27 +8,39 @@
 }
 
 .preview-logo-wrap {
-  margin: 0 auto 18px;
+  margin: 2px auto 16px;
 }
 
 .public-logo-wrap {
   margin: 8px auto 18px;
 }
 
-.preview-logo,
-.public-logo {
+/* The uploaded OXXEN artwork is a wide banner, so it must use the available
+   card width rather than a small fixed logo width. */
+.preview-logo {
   display: block;
-  width: min(240px, 78%);
-  max-width: none;
+  width: 100%;
+  max-width: 290px;
   height: auto;
-  max-height: 110px;
+  max-height: 145px;
   object-fit: contain;
   margin: 0;
 }
 
-@media (min-width: 768px) {
+.public-logo {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  height: auto;
+  max-height: 190px;
+  object-fit: contain;
+  margin: 0;
+}
+
+@media (max-width: 520px) {
   .public-logo {
-    width: min(260px, 62%);
-    max-height: 120px;
+    width: 100%;
+    max-width: 100%;
+    max-height: 170px;
   }
 }

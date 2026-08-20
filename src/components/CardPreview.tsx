@@ -10,7 +10,7 @@ export function CardPreview({ card }: { card: Partial<CardDraft | CardRecord> })
     <div className={`phone-preview ${dark ? 'theme-dark' : 'theme-light'}`} style={{ '--accent': accent } as CSSProperties}>
       <div className="phone-notch" />
       <div className="preview-card">
-        {card.logo_url && <img className="preview-logo" src={card.logo_url} alt="Logo" />}
+        {card.logo_url && <div className="preview-logo-wrap"><img className="preview-logo" src={card.logo_url} alt="Logo" /></div>}
         <div className="avatar-wrap">
           {card.profile_image_url ? <img src={card.profile_image_url} alt="Perfil" /> : <span>{(card.full_name || 'O').slice(0,1)}</span>}
         </div>

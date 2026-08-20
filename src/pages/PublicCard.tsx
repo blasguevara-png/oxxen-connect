@@ -4,7 +4,7 @@ import { useParams } from 'react-router-dom'
 import { Brand } from '../components/Brand'
 import { Loading } from '../components/Loading'
 import { trackEvent } from '../lib/analytics'
-import { cleanPhone, makeVCard, normalizeUrl, whatsappUrl } from '../lib/helpers'
+import { cleanPhone, normalizeUrl, whatsappUrl } from '../lib/helpers'
 import { supabase } from '../lib/supabase'
 import type { CardRecord } from '../types'
 
@@ -71,6 +71,7 @@ export function PublicCard() {
 }
 
 function openContactEditor(card: CardRecord) {
+  const vcardUrl = `${window.location.origin}/api/contact?slug=${encodeURIComponent(card.slug)}`
   const isAndroid = /Android/i.test(navigator.userAgent)
 
   if (isAndroid) {
@@ -82,16 +83,14 @@ function openContactEditor(card: CardRecord) {
       card.company ? `S.company=${encodeURIComponent(card.company)}` : '',
       card.job_title ? `S.job_title=${encodeURIComponent(card.job_title)}` : '',
       card.address ? `S.postal=${encodeURIComponent(card.address)}` : '',
+      `S.browser_fallback_url=${encodeURIComponent(vcardUrl)}`,
     ].filter(Boolean).join(';')
 
-    window.location.href = `intent:#Intent;action=android.intent.action.INSERT;type=vnd.android.cursor.dir/contact;${extras};end`
+    window.location.href = `intent:#Intent;action=android.intent.action.INSERT;type=vnd.android.cursor.dir/contact;category=android.intent.category.BROWSABLE;${extras};end`
     return
   }
 
-  const blob = new Blob([makeVCard(card)], { type: 'text/vcard;charset=utf-8' })
-  const vcardUrl = URL.createObjectURL(blob)
-  window.location.assign(vcardUrl)
-  window.setTimeout(() => URL.revokeObjectURL(vcardUrl), 60_000)
+  window.location.href = vcardUrl
 }
 
 function buildActions(card: CardRecord) {

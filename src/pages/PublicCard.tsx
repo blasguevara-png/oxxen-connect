@@ -56,7 +56,7 @@ export function PublicCard() {
         <h1>{card.full_name}</h1>
         <div className="public-subtitle">{card.job_title && <span>{card.job_title}</span>}{card.company && <span><Building2 size={15}/>{card.company}</span>}</div>
         {card.bio && <p className="public-bio">{card.bio}</p>}
-        <button className="public-primary" onClick={saveContact}><UserPlus size={19}/>{card.cta_text || 'Guardar contacto'}</button>
+        <button className="public-primary" onClick={saveContact}><UserPlus size={19} style={{ marginLeft: 0 }}/>{card.cta_text || 'Guardar contacto'}</button>
         <div className="public-actions">
           {card.links_order.map(key => {
             const action = actionMap.get(key)

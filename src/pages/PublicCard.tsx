@@ -88,8 +88,10 @@ function openContactEditor(card: CardRecord) {
     return
   }
 
-  const vcardUrl = `data:text/vcard;charset=utf-8,${encodeURIComponent(makeVCard(card))}`
-  window.location.href = vcardUrl
+  const blob = new Blob([makeVCard(card)], { type: 'text/vcard;charset=utf-8' })
+  const vcardUrl = URL.createObjectURL(blob)
+  window.location.assign(vcardUrl)
+  window.setTimeout(() => URL.revokeObjectURL(vcardUrl), 60_000)
 }
 
 function buildActions(card: CardRecord) {

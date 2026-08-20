@@ -1,0 +1,27 @@
+/* Logo sizing overrides for public card and admin mobile preview */
+.preview-logo {
+  display: block;
+  width: min(220px, 72%);
+  max-width: none;
+  height: auto;
+  max-height: 90px;
+  object-fit: contain;
+  margin: 0 auto 18px;
+}
+
+.public-logo {
+  display: block;
+  width: min(220px, 72%);
+  max-width: none;
+  height: auto;
+  max-height: 90px;
+  object-fit: contain;
+  margin: 12px auto 20px;
+}
+
+@media (min-width: 768px) {
+  .public-logo {
+    width: min(240px, 60%);
+    max-height: 96px;
+  }
+}

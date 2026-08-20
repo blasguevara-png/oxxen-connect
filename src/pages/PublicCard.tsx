@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { Building2, Download, Globe2, Mail, MapPin, MessageCircle, Phone, Share2, UserPlus } from 'lucide-react'
+import { Building2, Globe2, Mail, MapPin, MessageCircle, Phone, Share2, UserPlus } from 'lucide-react'
 import { useParams } from 'react-router-dom'
 import { Brand } from '../components/Brand'
 import { Loading } from '../components/Loading'
 import { trackEvent } from '../lib/analytics'
-import { cleanPhone, downloadText, makeVCard, normalizeUrl, whatsappUrl } from '../lib/helpers'
+import { cleanPhone, makeVCard, normalizeUrl, whatsappUrl } from '../lib/helpers'
 import { supabase } from '../lib/supabase'
 import type { CardRecord } from '../types'
 
@@ -38,7 +38,10 @@ export function PublicCard() {
   if (!card) return <div className="public-shell"><div className="inactive-card"><Brand/><h1>Tarjeta temporalmente inactiva</h1><p>Este perfil no está disponible en este momento.</p></div></div>
 
   const accent = card.accent_color || '#20e3b2'
-  const saveContact = () => { trackEvent(card.id, 'vcard'); downloadText(`${card.slug}.vcf`, makeVCard(card), 'text/vcard;charset=utf-8') }
+  const saveContact = () => {
+    trackEvent(card.id, 'vcard')
+    openContactEditor(card)
+  }
   const share = async () => {
     if (navigator.share) await navigator.share({ title: card.full_name, text: card.company || '', url: window.location.href })
     else await navigator.clipboard.writeText(window.location.href)
@@ -48,12 +51,12 @@ export function PublicCard() {
     <div className={`public-shell public-${card.theme}`} style={{ '--accent': accent } as CSSProperties}>
       <main className="public-profile">
         <div className="public-top"><div className="tiny-brand">OXXEN Connect</div><button className="circle-button" onClick={share} aria-label="Compartir"><Share2 size={18}/></button></div>
-        {card.logo_url && <img className="public-logo" src={card.logo_url} alt={`Logo ${card.company || ''}`} />}
+        {card.logo_url && <img className="public-logo" style={{ width: 'min(240px, 72%)', maxWidth: 240, maxHeight: 96, height: 'auto' }} src={card.logo_url} alt={`Logo ${card.company || ''}`} />}
         <div className="public-avatar">{card.profile_image_url ? <img src={card.profile_image_url} alt={card.full_name}/> : <span>{card.full_name.slice(0,1)}</span>}</div>
         <h1>{card.full_name}</h1>
         <div className="public-subtitle">{card.job_title && <span>{card.job_title}</span>}{card.company && <span><Building2 size={15}/>{card.company}</span>}</div>
         {card.bio && <p className="public-bio">{card.bio}</p>}
-        <button className="public-primary" onClick={saveContact}><UserPlus size={19}/>{card.cta_text || 'Guardar contacto'}<Download size={16}/></button>
+        <button className="public-primary" onClick={saveContact}><UserPlus size={19}/>{card.cta_text || 'Guardar contacto'}</button>
         <div className="public-actions">
           {card.links_order.map(key => {
             const action = actionMap.get(key)
@@ -65,6 +68,28 @@ export function PublicCard() {
       </main>
     </div>
   )
+}
+
+function openContactEditor(card: CardRecord) {
+  const isAndroid = /Android/i.test(navigator.userAgent)
+
+  if (isAndroid) {
+    const phone = cleanPhone(card.phone || card.whatsapp)
+    const extras = [
+      `S.name=${encodeURIComponent(card.full_name)}`,
+      phone ? `S.phone=${encodeURIComponent(phone)}` : '',
+      card.email ? `S.email=${encodeURIComponent(card.email.trim())}` : '',
+      card.company ? `S.company=${encodeURIComponent(card.company)}` : '',
+      card.job_title ? `S.job_title=${encodeURIComponent(card.job_title)}` : '',
+      card.address ? `S.postal=${encodeURIComponent(card.address)}` : '',
+    ].filter(Boolean).join(';')
+
+    window.location.href = `intent:#Intent;action=android.intent.action.INSERT;type=vnd.android.cursor.dir/contact;${extras};end`
+    return
+  }
+
+  const vcardUrl = `data:text/vcard;charset=utf-8,${encodeURIComponent(makeVCard(card))}`
+  window.location.href = vcardUrl
 }
 
 function buildActions(card: CardRecord) {

@@ -71,26 +71,37 @@ export function PublicCard() {
 }
 
 function openContactEditor(card: CardRecord) {
-  const vcardUrl = `${window.location.origin}/api/contact?slug=${encodeURIComponent(card.slug)}`
   const isAndroid = /Android/i.test(navigator.userAgent)
 
   if (isAndroid) {
+    const { givenName, familyName } = splitContactName(card.full_name)
+    const params = new URLSearchParams()
+    if (givenName) params.set('givenname', givenName)
+    if (familyName) params.set('familyname', familyName)
     const phone = cleanPhone(card.phone || card.whatsapp)
-    const extras = [
-      `S.name=${encodeURIComponent(card.full_name)}`,
-      phone ? `S.phone=${encodeURIComponent(phone)}` : '',
-      card.email ? `S.email=${encodeURIComponent(card.email.trim())}` : '',
-      card.company ? `S.company=${encodeURIComponent(card.company)}` : '',
-      card.job_title ? `S.job_title=${encodeURIComponent(card.job_title)}` : '',
-      card.address ? `S.postal=${encodeURIComponent(card.address)}` : '',
-      `S.browser_fallback_url=${encodeURIComponent(vcardUrl)}`,
-    ].filter(Boolean).join(';')
+    if (phone) params.set('phone', phone)
+    if (card.email) params.set('email', card.email.trim())
 
-    window.location.href = `intent:#Intent;action=android.intent.action.INSERT;type=vnd.android.cursor.dir/contact;category=android.intent.category.BROWSABLE;${extras};end`
+    // Desde una web móvil Chrome no puede invocar de forma fiable la actividad
+    // nativa de "crear contacto" si la app no expone una Activity BROWSABLE.
+    // Abrimos el formulario de Google Contacts ya rellenado para evitar descargar .vcf.
+    window.location.href = `https://contacts.google.com/new?${params.toString()}`
     return
   }
 
-  window.location.href = vcardUrl
+  // En iPhone/iPad y escritorio se mantiene vCard como formato interoperable.
+  window.location.href = `${window.location.origin}/api/contact?slug=${encodeURIComponent(card.slug)}`
+}
+
+function splitContactName(fullName: string) {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean)
+  if (parts.length <= 1) return { givenName: parts[0] || '', familyName: '' }
+  if (parts.length === 2) return { givenName: parts[0], familyName: parts[1] }
+  const splitAt = Math.ceil(parts.length / 2)
+  return {
+    givenName: parts.slice(0, splitAt).join(' '),
+    familyName: parts.slice(splitAt).join(' '),
+  }
 }
 
 function buildActions(card: CardRecord) {

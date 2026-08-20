@@ -74,34 +74,29 @@ function openContactEditor(card: CardRecord) {
   const isAndroid = /Android/i.test(navigator.userAgent)
 
   if (isAndroid) {
-    const { givenName, familyName } = splitContactName(card.full_name)
-    const params = new URLSearchParams()
-    if (givenName) params.set('givenname', givenName)
-    if (familyName) params.set('familyname', familyName)
     const phone = cleanPhone(card.phone || card.whatsapp)
-    if (phone) params.set('phone', phone)
-    if (card.email) params.set('email', card.email.trim())
+    const fallback = `${window.location.origin}/api/contact?slug=${encodeURIComponent(card.slug)}`
+    const isSamsung = /\bSM-[A-Z0-9]+/i.test(navigator.userAgent) || /SamsungBrowser/i.test(navigator.userAgent)
 
-    // Desde una web móvil Chrome no puede invocar de forma fiable la actividad
-    // nativa de "crear contacto" si la app no expone una Activity BROWSABLE.
-    // Abrimos el formulario de Google Contacts ya rellenado para evitar descargar .vcf.
-    window.location.href = `https://contacts.google.com/new?${params.toString()}`
+    const extras = [
+      `S.name=${encodeURIComponent(card.full_name)}`,
+      phone ? `S.phone=${encodeURIComponent(phone)}` : '',
+      card.email ? `S.email=${encodeURIComponent(card.email.trim())}` : '',
+      card.company ? `S.company=${encodeURIComponent(card.company)}` : '',
+      card.job_title ? `S.job_title=${encodeURIComponent(card.job_title)}` : '',
+      card.address ? `S.postal=${encodeURIComponent(card.address)}` : '',
+      isSamsung ? 'package=com.samsung.android.app.contacts' : '',
+      `S.browser_fallback_url=${encodeURIComponent(fallback)}`,
+    ].filter(Boolean).join(';')
+
+    // Samsung Contacts registers ACTION_INSERT for raw contacts. Other Android
+    // devices can resolve the same generic intent with their installed Contacts app.
+    window.location.href = `intent:#Intent;action=android.intent.action.INSERT;type=vnd.android.cursor.dir/raw_contact;${extras};end`
     return
   }
 
-  // En iPhone/iPad y escritorio se mantiene vCard como formato interoperable.
+  // iPhone/iPad and desktop use vCard, which the OS can import into Contacts.
   window.location.href = `${window.location.origin}/api/contact?slug=${encodeURIComponent(card.slug)}`
-}
-
-function splitContactName(fullName: string) {
-  const parts = fullName.trim().split(/\s+/).filter(Boolean)
-  if (parts.length <= 1) return { givenName: parts[0] || '', familyName: '' }
-  if (parts.length === 2) return { givenName: parts[0], familyName: parts[1] }
-  const splitAt = Math.ceil(parts.length / 2)
-  return {
-    givenName: parts.slice(0, splitAt).join(' '),
-    familyName: parts.slice(splitAt).join(' '),
-  }
 }
 
 function buildActions(card: CardRecord) {

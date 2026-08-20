@@ -51,7 +51,7 @@ export function PublicCard() {
     <div className={`public-shell public-${card.theme}`} style={{ '--accent': accent } as CSSProperties}>
       <main className="public-profile">
         <div className="public-top"><div className="tiny-brand">OXXEN Connect</div><button className="circle-button" onClick={share} aria-label="Compartir"><Share2 size={18}/></button></div>
-        {card.logo_url && <img className="public-logo" style={{ width: 'min(240px, 72%)', maxWidth: 240, maxHeight: 96, height: 'auto' }} src={card.logo_url} alt={`Logo ${card.company || ''}`} />}
+        {card.logo_url && <img className="public-logo" src={card.logo_url} alt={`Logo ${card.company || ''}`} />}
         <div className="public-avatar">{card.profile_image_url ? <img src={card.profile_image_url} alt={card.full_name}/> : <span>{card.full_name.slice(0,1)}</span>}</div>
         <h1>{card.full_name}</h1>
         <div className="public-subtitle">{card.job_title && <span>{card.job_title}</span>}{card.company && <span><Building2 size={15}/>{card.company}</span>}</div>

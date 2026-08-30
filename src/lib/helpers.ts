@@ -12,6 +12,8 @@ export const LINK_ORDER = [
   'linkedin',
 ] as const
 
+const DEFAULT_PUBLIC_BASE_URL = 'https://oxxen-connect.vercel.app'
+
 export function slugify(value: string) {
   return value
     .normalize('NFD')
@@ -38,8 +40,13 @@ export function whatsappUrl(value?: string | null) {
   return phone ? `https://wa.me/${phone}` : ''
 }
 
-export function publicCardUrl(slug: string) {
-  return `${window.location.origin}/p/${slug}`
+export function publicBaseUrl() {
+  const configured = import.meta.env.VITE_PUBLIC_BASE_URL?.trim()
+  return (configured || DEFAULT_PUBLIC_BASE_URL).replace(/\/+$/, '')
+}
+
+export function publicCardUrl(publicId: string) {
+  return `${publicBaseUrl()}/p/${encodeURIComponent(publicId)}`
 }
 
 export function makeVCard(card: CardRecord) {

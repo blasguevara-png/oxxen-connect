@@ -2,6 +2,7 @@ export type ThemeMode = 'dark' | 'light'
 
 export type CardRecord = {
   id: string
+  public_id: string
   slug: string
   full_name: string
   company: string | null
@@ -23,12 +24,38 @@ export type CardRecord = {
   profile_image_url: string | null
   logo_url: string | null
   active: boolean
+  deleted_at: string | null
   links_order: string[]
   created_at: string
   updated_at: string
 }
 
-export type CardDraft = Omit<CardRecord, 'id' | 'created_at' | 'updated_at'>
+export type PublicCardRecord = Pick<
+  CardRecord,
+  | 'public_id'
+  | 'full_name'
+  | 'company'
+  | 'job_title'
+  | 'bio'
+  | 'whatsapp'
+  | 'phone'
+  | 'email'
+  | 'website'
+  | 'instagram'
+  | 'facebook'
+  | 'tiktok'
+  | 'linkedin'
+  | 'address'
+  | 'maps_url'
+  | 'cta_text'
+  | 'accent_color'
+  | 'theme'
+  | 'profile_image_url'
+  | 'logo_url'
+  | 'links_order'
+>
+
+export type CardDraft = Omit<CardRecord, 'id' | 'public_id' | 'deleted_at' | 'created_at' | 'updated_at'>
 
 export type AnalyticsEvent = {
   id: string

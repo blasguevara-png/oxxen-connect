@@ -67,6 +67,7 @@ on conflict (alias) do nothing;
 create or replace function public.oxxen_connect_sync_slug_aliases()
 returns trigger
 language plpgsql
+security definer
 set search_path = public
 as $$
 begin
@@ -311,6 +312,13 @@ grant execute on function public.get_public_card_status(text) to anon, authentic
 alter table public.oxxen_connect_analytics_events
   add column if not exists session_id text,
   add column if not exists visitor_hash text;
+
+-- Extend the existing event allowlist to include the share action handled by the UI.
+alter table public.oxxen_connect_analytics_events
+  drop constraint if exists oxxen_connect_analytics_events_event_type_check;
+alter table public.oxxen_connect_analytics_events
+  add constraint oxxen_connect_analytics_events_event_type_check
+  check (event_type in ('view','whatsapp','phone','email','website','instagram','facebook','tiktok','linkedin','maps','vcard','share'));
 
 create index if not exists idx_oxxen_events_visitor_created
   on public.oxxen_connect_analytics_events(visitor_hash, created_at desc)

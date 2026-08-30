@@ -1,5 +1,5 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ArrowLeft, Check, Copy, Download, ExternalLink, ImagePlus, QrCode, Save } from 'lucide-react'
+import { ArrowLeft, Check, Copy, Download, ExternalLink, ImagePlus, LockKeyhole, QrCode, Save } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import QRCode from 'qrcode'
 import { CardPreview } from '../components/CardPreview'
@@ -19,6 +19,7 @@ export function CardEditor() {
   const isNew = !id
   const navigate = useNavigate()
   const [draft, setDraft] = useState<CardDraft>(emptyDraft)
+  const [publicId, setPublicId] = useState('')
   const [loading, setLoading] = useState(!isNew)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -37,7 +38,8 @@ export function CardEditor() {
       if (loadError) setError(loadError.message)
       else {
         const card = data as CardRecord
-        const { id: _id, created_at: _created, updated_at: _updated, ...rest } = card
+        const { id: _id, public_id, deleted_at: _deletedAt, created_at: _created, updated_at: _updated, ...rest } = card
+        setPublicId(public_id)
         setDraft({ ...emptyDraft, ...rest, links_order: Array.isArray(rest.links_order) ? rest.links_order : [...LINK_ORDER] })
       }
       setLoading(false)
@@ -46,15 +48,15 @@ export function CardEditor() {
   }, [id])
 
   useEffect(() => {
-    if (!draft.slug) {
+    if (!publicId) {
       setQrData('')
       setQrSvg('')
       return
     }
-    const url = publicCardUrl(draft.slug)
+    const url = publicCardUrl(publicId)
     void QRCode.toDataURL(url, { width: 640, margin: 2 }).then(setQrData)
     void QRCode.toString(url, { type: 'svg', margin: 2 }).then(setQrSvg)
-  }, [draft.slug])
+  }, [publicId])
 
   useEffect(() => {
     if (window.location.hash === '#qr') setTimeout(()=>document.getElementById('qr')?.scrollIntoView({ behavior: 'smooth' }), 250)
@@ -101,13 +103,17 @@ export function CardEditor() {
 
       const payload = { ...draft, full_name: draft.full_name.trim(), slug: draft.slug.trim(), links_order: draft.links_order }
       let cardId = id
+      let permanentId = publicId
+
       if (id) {
         const { error: updateError } = await supabase.from('oxxen_connect_cards').update(payload).eq('id', id)
         if (updateError) throw updateError
       } else {
-        const { data, error: insertError } = await supabase.from('oxxen_connect_cards').insert(payload).select('id').single()
+        const { data, error: insertError } = await supabase.from('oxxen_connect_cards').insert(payload).select('id,public_id').single()
         if (insertError) throw insertError
         cardId = data.id
+        permanentId = data.public_id
+        setPublicId(data.public_id)
       }
 
       const mediaUpdates: Record<string, string> = {}
@@ -121,6 +127,10 @@ export function CardEditor() {
 
       setProfileFile(null); setLogoFile(null); setSaved(true)
       if (!id && cardId) navigate(`/admin/clientes/${cardId}`, { replace: true })
+      if (!permanentId && cardId) {
+        const { data } = await supabase.from('oxxen_connect_cards').select('public_id').eq('id', cardId).single()
+        if (data?.public_id) setPublicId(data.public_id)
+      }
       setTimeout(()=>setSaved(false), 2200)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo guardar')
@@ -128,22 +138,23 @@ export function CardEditor() {
   }
 
   const downloadPng = () => {
-    if (!qrData) return
-    const a = document.createElement('a'); a.href = qrData; a.download = `qr-${draft.slug}.png`; a.click()
+    if (!qrData || !publicId) return
+    const a = document.createElement('a'); a.href = qrData; a.download = `qr-${draft.slug || publicId}.png`; a.click()
   }
 
   if (loading) return <Loading/>
 
   return (
     <div className="page-stack editor-page">
-      <header className="page-header"><div><Link className="back-link" to="/admin/clientes"><ArrowLeft size={16}/> Clientes</Link><h1>{isNew ? 'Nueva tarjeta' : 'Editar tarjeta'}</h1><p>La URL del perfil será la que se grabe en NFC y QR.</p></div>{!isNew && draft.slug && <a className="ghost-button" href={`/p/${draft.slug}`} target="_blank" rel="noreferrer"><ExternalLink size={16}/> Ver perfil</a>}</header>
+      <header className="page-header"><div><Link className="back-link" to="/admin/clientes"><ArrowLeft size={16}/> Clientes</Link><h1>{isNew ? 'Nueva tarjeta' : 'Editar tarjeta'}</h1><p>La URL permanente es la que se graba en el NFC y QR físico.</p></div>{publicId && <a className="ghost-button" href={publicCardUrl(publicId)} target="_blank" rel="noreferrer"><ExternalLink size={16}/> Ver perfil</a>}</header>
       <form onSubmit={save} className="editor-grid">
         <div className="form-stack">
           <Section title="Identidad">
             <div className="grid-2"><Field label="Nombre completo *"><input value={draft.full_name} onChange={e=>nameChange(e.target.value)} required /></Field><Field label="Empresa / negocio"><input value={draft.company || ''} onChange={e=>setField('company', e.target.value)} /></Field></div>
-            <div className="grid-2"><Field label="Cargo"><input value={draft.job_title || ''} onChange={e=>setField('job_title', e.target.value)} /></Field><Field label="Slug público *"><div className="prefix-input"><span>/p/</span><input value={draft.slug} onChange={e=>setField('slug', slugify(e.target.value))} required /></div></Field></div>
+            <div className="grid-2"><Field label="Cargo"><input value={draft.job_title || ''} onChange={e=>setField('job_title', e.target.value)} /></Field><Field label="Alias público"><div className="prefix-input"><span>/p/</span><input value={draft.slug} onChange={e=>setField('slug', slugify(e.target.value))} required /></div><small>El alias puede cambiar. El QR/NFC usa un identificador permanente independiente.</small></Field></div>
+            {publicId ? <div className="nfc-note"><strong><LockKeyhole size={14}/> URL permanente protegida</strong><p>{publicCardUrl(publicId)}</p><p>Está vinculada al QR/NFC físico y no puede modificarse.</p></div> : <div className="nfc-note"><strong><LockKeyhole size={14}/> URL permanente</strong><p>Se generará automáticamente al guardar la tarjeta por primera vez.</p></div>}
             <Field label="Descripción corta"><textarea rows={3} value={draft.bio || ''} onChange={e=>setField('bio', e.target.value)} maxLength={220}/></Field>
-            <div className="upload-grid"><UploadBox label="Foto de perfil" preview={profilePreview || draft.profile_image_url || ''} onChange={e=>chooseFile('profile', e)}/><UploadBox label="Logo" preview={logoPreview || draft.logo_url || ''} onChange={e=>chooseFile('logo', e)}/></div>
+            <div className="upload-grid"><UploadBox label="Foto de perfil" preview={profilePreview || draft.profile_image_url || ''} onChange={e=>chooseFile('profile', e)}/><UploadBox label="Logo / banner actual" preview={logoPreview || draft.logo_url || ''} onChange={e=>chooseFile('logo', e)}/></div>
           </Section>
 
           <Section title="Contacto">
@@ -168,7 +179,7 @@ export function CardEditor() {
 
         <aside className="editor-aside">
           <div className="sticky-preview"><h3>Vista previa móvil</h3><CardPreview card={previewDraft}/></div>
-          {draft.slug && <div id="qr" className="panel qr-panel"><div className="panel-title"><QrCode size={20}/><h3>QR + NFC</h3></div>{qrData && <img className="qr-image" src={qrData} alt={`QR de ${draft.slug}`} />}<code>{publicCardUrl(draft.slug)}</code><div className="button-row"><button type="button" className="ghost-button" onClick={()=>copyText(publicCardUrl(draft.slug))}><Copy size={16}/> Copiar URL</button><button type="button" className="ghost-button" onClick={downloadPng}><Download size={16}/> PNG</button><button type="button" className="ghost-button" onClick={()=>downloadText(`qr-${draft.slug}.svg`, qrSvg, 'image/svg+xml')}><Download size={16}/> SVG</button></div><div className="nfc-note"><strong>URL para grabar en NFC</strong><p>Graba únicamente esta URL en el chip; los datos se actualizan desde OXXEN Connect sin reprogramar la tarjeta.</p></div></div>}
+          {publicId ? <div id="qr" className="panel qr-panel"><div className="panel-title"><QrCode size={20}/><h3>QR + NFC permanente</h3></div>{qrData && <img className="qr-image" src={qrData} alt={`QR de ${draft.slug}`} />}<code>{publicCardUrl(publicId)}</code><div className="button-row"><button type="button" className="ghost-button" onClick={()=>copyText(publicCardUrl(publicId))}><Copy size={16}/> Copiar URL</button><button type="button" className="ghost-button" onClick={downloadPng}><Download size={16}/> PNG</button><button type="button" className="ghost-button" onClick={()=>downloadText(`qr-${draft.slug || publicId}.svg`, qrSvg, 'image/svg+xml')}><Download size={16}/> SVG</button></div><div className="nfc-note"><strong>URL para grabar en NFC</strong><p>Esta URL no depende del nombre ni del alias. Puedes editar los datos sin reprogramar la tarjeta física.</p></div></div> : <div className="panel qr-panel"><div className="panel-title"><QrCode size={20}/><h3>QR + NFC</h3></div><p>Guarda primero la tarjeta para generar su URL permanente y su QR definitivo.</p></div>}
         </aside>
       </form>
     </div>

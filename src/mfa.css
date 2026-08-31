@@ -1,0 +1,64 @@
+.mfa-page {
+  padding: 24px;
+}
+
+.mfa-card {
+  width: min(460px, 100%);
+}
+
+.mfa-loading {
+  padding: 22px;
+  text-align: center;
+  opacity: .75;
+}
+
+.mfa-enroll {
+  display: grid;
+  gap: 14px;
+  justify-items: center;
+  text-align: center;
+}
+
+.mfa-enroll p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.mfa-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 18px;
+  background: rgba(32, 227, 178, .12);
+}
+
+.mfa-qr {
+  width: min(240px, 78vw);
+  aspect-ratio: 1;
+  object-fit: contain;
+  padding: 12px;
+  border-radius: 18px;
+  background: white;
+}
+
+.mfa-secret {
+  width: 100%;
+  text-align: left;
+  padding: 12px 14px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 14px;
+}
+
+.mfa-secret summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.mfa-secret code {
+  display: block;
+  margin-top: 8px;
+  padding: 10px;
+  overflow-wrap: anywhere;
+  user-select: all;
+}

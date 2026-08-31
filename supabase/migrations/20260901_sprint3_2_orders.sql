@@ -127,10 +127,14 @@ security definer
 set search_path = ''
 as $$
 declare
-  v_order_id uuid := coalesce(new.order_id, old.order_id);
+  v_order_id uuid;
   v_subtotal numeric(12,2);
   v_quantity integer;
 begin
+  if tg_op = 'DELETE' then v_order_id := old.order_id;
+  else v_order_id := new.order_id;
+  end if;
+
   select coalesce(sum(i.subtotal), 0), coalesce(sum(i.quantity), 0)
     into v_subtotal, v_quantity
     from public.oxxen_connect_order_items i
@@ -143,7 +147,8 @@ begin
          updated_at = now()
    where o.id = v_order_id;
 
-  return coalesce(new, old);
+  if tg_op = 'DELETE' then return old; end if;
+  return new;
 end;
 $$;
 
@@ -286,7 +291,6 @@ with check (
   or (select auth.jwt()->>'aal') = 'aal2'
 );
 
--- Generic entity id keeps order auditing queryable without weakening the existing card audit schema.
 alter table public.oxxen_connect_audit_logs add column if not exists entity_id uuid;
 create index if not exists idx_oxxen_connect_audit_entity_created
   on public.oxxen_connect_audit_logs(entity_type, entity_id, created_at desc);

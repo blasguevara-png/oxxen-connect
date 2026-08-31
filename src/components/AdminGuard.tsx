@@ -75,6 +75,10 @@ export function AdminGuard() {
     setLoading(false)
   }, [])
 
+  const handleMfaVerified = useCallback(() => {
+    void check()
+  }, [check])
+
   useEffect(() => {
     let active = true
 
@@ -96,7 +100,7 @@ export function AdminGuard() {
   if (accessError) return <div className="screen-center"><div className="empty-state"><h2>No pudimos verificar el acceso</h2><p>Puede ser un problema temporal de conexión. Recarga la página para intentarlo nuevamente.</p></div></div>
   if (!user) return <Navigate to="/admin/login" replace state={{ from: location.pathname }} />
   if (!isAdmin || !role) return <div className="screen-center"><div className="empty-state"><h2>Acceso no autorizado</h2><p>Esta cuenta no está habilitada como administradora de OXXEN Connect.</p></div></div>
-  if (requiresMfa) return <MfaGate role={role} onVerified={() => void check()} />
+  if (requiresMfa) return <MfaGate role={role} onVerified={handleMfaVerified} />
 
   return <Outlet />
 }

@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useState } from 'react'
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { KeyRound, LogOut, ShieldCheck } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { Brand } from './Brand'
@@ -18,43 +18,60 @@ export function MfaGate({ role, onVerified }: Props) {
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
   const [working, setWorking] = useState(false)
+  const preparingRef = useRef(false)
 
   const prepare = useCallback(async () => {
+    if (preparingRef.current) return
+    preparingRef.current = true
     setError('')
     setMode('loading')
 
-    const assurance = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
-    if (assurance.error) throw assurance.error
-    if (assurance.data.currentLevel === 'aal2') {
-      onVerified()
-      return
+    try {
+      const assurance = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+      if (assurance.error) throw assurance.error
+      if (assurance.data.currentLevel === 'aal2') {
+        onVerified()
+        return
+      }
+
+      const factors = await supabase.auth.mfa.listFactors()
+      if (factors.error) throw factors.error
+
+      const verifiedTotp = factors.data.totp.find(factor => factor.status === 'verified')
+      if (verifiedTotp) {
+        setFactorId(verifiedTotp.id)
+        setMode('challenge')
+        return
+      }
+
+      // Best-effort cleanup when the SDK exposes abandoned/unverified factors.
+      for (const factor of factors.data.totp.filter(item => item.status !== 'verified')) {
+        await supabase.auth.mfa.unenroll({ factorId: factor.id })
+      }
+
+      let enrollment = await supabase.auth.mfa.enroll({
+        factorType: 'totp',
+        friendlyName: `OXXEN Connect ${role}`,
+      })
+
+      // If a previous enrollment was abandoned and Supabase keeps the friendly name reserved,
+      // retry once with a unique friendly name instead of leaving the OWNER locked out.
+      if (enrollment.error && (enrollment.error as { code?: string }).code === 'mfa_factor_name_conflict') {
+        enrollment = await supabase.auth.mfa.enroll({
+          factorType: 'totp',
+          friendlyName: `OXXEN Connect ${role} ${Date.now().toString(36)}`,
+        })
+      }
+
+      if (enrollment.error) throw enrollment.error
+
+      setFactorId(enrollment.data.id)
+      setQrCode(enrollment.data.totp.qr_code)
+      setSecret(enrollment.data.totp.secret)
+      setMode('enroll')
+    } finally {
+      preparingRef.current = false
     }
-
-    const factors = await supabase.auth.mfa.listFactors()
-    if (factors.error) throw factors.error
-
-    const verifiedTotp = factors.data.totp.find(factor => factor.status === 'verified')
-    if (verifiedTotp) {
-      setFactorId(verifiedTotp.id)
-      setMode('challenge')
-      return
-    }
-
-    // Remove abandoned/unverified TOTP enrollments so the OWNER is not left in a broken setup loop.
-    for (const factor of factors.data.totp.filter(item => item.status !== 'verified')) {
-      await supabase.auth.mfa.unenroll({ factorId: factor.id })
-    }
-
-    const enrollment = await supabase.auth.mfa.enroll({
-      factorType: 'totp',
-      friendlyName: `OXXEN Connect ${role}`,
-    })
-    if (enrollment.error) throw enrollment.error
-
-    setFactorId(enrollment.data.id)
-    setQrCode(enrollment.data.totp.qr_code)
-    setSecret(enrollment.data.totp.secret)
-    setMode('enroll')
   }, [onVerified, role])
 
   useEffect(() => {
@@ -100,6 +117,10 @@ export function MfaGate({ role, onVerified }: Props) {
   }
 
   const logout = async () => {
+    // If the user explicitly abandons a fresh enrollment, clean that factor before logging out.
+    if (mode === 'enroll' && factorId) {
+      await supabase.auth.mfa.unenroll({ factorId })
+    }
     await supabase.auth.signOut({ scope: 'local' })
     window.location.assign('/admin/login')
   }

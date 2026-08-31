@@ -14,6 +14,7 @@ const outputDir = path.resolve(process.argv[2] || `backups/oxxen-connect-${stamp
 await mkdir(outputDir, { recursive: true })
 
 const tables = [
+  'oxxen_connect_customers',
   'oxxen_connect_cards',
   'oxxen_connect_card_aliases',
   'oxxen_connect_admins',

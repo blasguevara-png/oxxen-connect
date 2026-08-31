@@ -108,6 +108,31 @@ revoke all on table public.oxxen_connect_customers from public, anon;
 grant select, insert, update on table public.oxxen_connect_customers to authenticated;
 grant usage, select on sequence public.oxxen_connect_customers_customer_number_seq to authenticated;
 
+-- Backup restore inserts explicit customer_number values. Resync the identity sequence afterwards.
+create or replace function public.oxxen_connect_sync_customer_sequence()
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  current_max bigint;
+begin
+  select coalesce(max(c.customer_number), 0)
+    into current_max
+    from public.oxxen_connect_customers c;
+
+  if current_max = 0 then
+    perform setval('public.oxxen_connect_customers_customer_number_seq'::regclass, 1, false);
+  else
+    perform setval('public.oxxen_connect_customers_customer_number_seq'::regclass, current_max, true);
+  end if;
+end;
+$$;
+
+revoke all on function public.oxxen_connect_sync_customer_sequence() from public, anon, authenticated;
+grant execute on function public.oxxen_connect_sync_customer_sequence() to service_role;
+
 -- Every authenticated OXXEN admin role may read customer records.
 drop policy if exists oxxen_customers_admin_read on public.oxxen_connect_customers;
 create policy oxxen_customers_admin_read

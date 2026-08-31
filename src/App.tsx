@@ -8,6 +8,9 @@ import { Cards } from './pages/Cards'
 import { CardEditor } from './pages/CardEditor'
 import { PublicCard } from './pages/PublicCard'
 import { AuditLog } from './pages/AuditLog'
+import { Orders } from './pages/Orders'
+import { OrderEditor } from './pages/OrderEditor'
+import { CustomerDetail } from './pages/CustomerDetail'
 
 export default function App() {
   return (
@@ -21,7 +24,11 @@ export default function App() {
             <Route index element={<Dashboard/>}/>
             <Route path="clientes" element={<Cards/>}/>
             <Route path="clientes/nuevo" element={<CardEditor/>}/>
+            <Route path="clientes/:customerId/resumen" element={<CustomerDetail/>}/>
             <Route path="clientes/:id" element={<CardEditor/>}/>
+            <Route path="pedidos" element={<Orders/>}/>
+            <Route path="pedidos/nuevo" element={<OrderEditor/>}/>
+            <Route path="pedidos/:id" element={<OrderEditor/>}/>
             <Route path="actividad" element={<AuditLog/>}/>
           </Route>
         </Route>

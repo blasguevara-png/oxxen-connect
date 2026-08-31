@@ -35,7 +35,13 @@ Las tarjetas antiguas que contienen `https://oxxen-connect.vercel.app/p/:identif
 - `oxxen_connect_audit_logs`
 - vista `oxxen_connect_analytics_daily`
 
-El acceso administrativo está protegido por Supabase Auth + RLS. La tabla de administradores dispone de roles preparados para `OWNER`, `ADMIN`, `EDITOR`, `SUPPORT` y `SALES`; el Sprint 2 mantiene el comportamiento actual de autorización para no romper el panel mientras se prepara la separación granular de permisos.
+El acceso administrativo está protegido por Supabase Auth + RLS. La tabla de administradores dispone de roles `OWNER`, `ADMIN`, `EDITOR`, `SUPPORT` y `SALES`.
+
+### MFA administrativo
+
+`OWNER` requiere TOTP MFA antes de acceder a los datos operativos del panel. El frontend exige una sesión `aal2` y una política RLS restrictiva aplica la misma condición en PostgreSQL/Storage. `ADMIN` queda preparado para incorporarse a la lista de roles con MFA obligatorio cuando OXXEN lo decida.
+
+Los secretos TOTP permanecen dentro de Supabase Auth; OXXEN Connect no los almacena en tablas propias. Ver `docs/SPRINT2_CLOSEOUT.md` para enrollment, recuperación y operación.
 
 ## Analytics
 
@@ -85,25 +91,23 @@ El CI ejecuta lint, typecheck, tests y build en PR/main. El smoke test de produc
 
 ## Backups y restauración
 
-Antes de una migración de producción se debe crear un snapshot y, para una copia externa, ejecutar desde un entorno seguro:
+Los scripts de export/restore siguen disponibles:
 
 ```bash
 SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... npm run backup:export
-```
-
-La restauración es dry-run por defecto:
-
-```bash
 npm run backup:restore -- backups/<carpeta>
 ```
 
-Solo después de revisar el backup:
+La restauración es dry-run por defecto y conserva `id`, `public_id` y aliases originales.
 
-```bash
-npm run backup:restore -- backups/<carpeta> --apply
-```
+Además, `.github/workflows/encrypted-backup.yml` prepara backups externos automáticos cifrados:
 
-La restauración conserva los `id`, `public_id` y aliases originales; nunca genera identificadores físicos nuevos. Ver `docs/BACKUP_RESTORE.md`.
+- diario: 7 días;
+- semanal: 28 días;
+- mensual: 90 días;
+- ejecución manual antes de migraciones.
+
+El workflow exporta, valida en dry-run, cifra con AES-256-CBC/PBKDF2 y sube únicamente el artefacto cifrado. Requiere tres GitHub Actions secrets descritos en `docs/SPRINT2_CLOSEOUT.md`; nunca colocar secretos en el repositorio.
 
 ## Migraciones
 
@@ -112,7 +116,7 @@ Los cambios de esquema se guardan en `supabase/migrations/`. No editar migracion
 1. snapshot/backup;
 2. inspección;
 3. aplicar migración;
-4. smoke tests de login, dashboard, perfil público, QR histórico y `/api/contact`;
+4. smoke tests de login, MFA, dashboard, perfil público, QR histórico y `/api/contact`;
 5. revisar Security/Performance Advisors y logs.
 
 ## API de contacto
@@ -122,7 +126,7 @@ Los cambios de esquema se guardan en `supabase/migrations/`. No editar migracion
 ## Roadmap posterior al Sprint 2
 
 - permisos granulares por rol;
-- MFA/2FA administrativo;
+- obligatoriedad de MFA para `ADMIN` cuando exista más personal;
 - analytics comercial por rango de fechas;
 - retención/rollup físico de analytics;
 - plantillas por rubro;

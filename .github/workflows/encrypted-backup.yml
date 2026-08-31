@@ -1,0 +1,93 @@
+name: Encrypted Production Backup
+
+on:
+  schedule:
+    # 00:30 Peru (UTC-5) every day.
+    - cron: '30 5 * * *'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Motivo del backup (por ejemplo pre-migracion)'
+        required: false
+        default: 'manual'
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SUPABASE_URL: ${{ secrets.OXXEN_BACKUP_SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.OXXEN_BACKUP_SERVICE_ROLE_KEY }}
+      BACKUP_PASSPHRASE: ${{ secrets.OXXEN_BACKUP_ENCRYPTION_PASSPHRASE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Validate backup secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_URL" || { echo 'Missing OXXEN_BACKUP_SUPABASE_URL'; exit 1; }
+          test -n "$SUPABASE_SERVICE_ROLE_KEY" || { echo 'Missing OXXEN_BACKUP_SERVICE_ROLE_KEY'; exit 1; }
+          test -n "$BACKUP_PASSPHRASE" || { echo 'Missing OXXEN_BACKUP_ENCRYPTION_PASSPHRASE'; exit 1; }
+          test ${#BACKUP_PASSPHRASE} -ge 24 || { echo 'Backup passphrase must be at least 24 characters'; exit 1; }
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Export operational backup
+        run: node scripts/export-backup.mjs "$RUNNER_TEMP/oxxen-connect-backup"
+
+      - name: Validate restore package in dry-run mode
+        run: node scripts/restore-backup.mjs "$RUNNER_TEMP/oxxen-connect-backup"
+
+      - name: Create encrypted archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/oxxen-connect-backup.tar.gz" oxxen-connect-backup
+          openssl enc -aes-256-cbc -salt -pbkdf2 -iter 250000 \
+            -pass env:BACKUP_PASSPHRASE \
+            -in "$RUNNER_TEMP/oxxen-connect-backup.tar.gz" \
+            -out "$RUNNER_TEMP/oxxen-connect-backup.tar.gz.enc"
+          rm -rf "$RUNNER_TEMP/oxxen-connect-backup" "$RUNNER_TEMP/oxxen-connect-backup.tar.gz"
+
+      - name: Classify retention tier
+        id: tier
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "stamp=$(date -u +'%Y%m%dT%H%M%SZ')" >> "$GITHUB_OUTPUT"
+          echo "weekday=$(date -u +'%u')" >> "$GITHUB_OUTPUT"
+          echo "day=$(date -u +'%d')" >> "$GITHUB_OUTPUT"
+
+      - name: Upload daily encrypted backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: oxxen-connect-daily-${{ steps.tier.outputs.stamp }}
+          path: ${{ runner.temp }}/oxxen-connect-backup.tar.gz.enc
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload weekly encrypted backup
+        if: steps.tier.outputs.weekday == '7'
+        uses: actions/upload-artifact@v4
+        with:
+          name: oxxen-connect-weekly-${{ steps.tier.outputs.stamp }}
+          path: ${{ runner.temp }}/oxxen-connect-backup.tar.gz.enc
+          retention-days: 28
+          if-no-files-found: error
+
+      - name: Upload monthly encrypted backup
+        if: steps.tier.outputs.day == '01'
+        uses: actions/upload-artifact@v4
+        with:
+          name: oxxen-connect-monthly-${{ steps.tier.outputs.stamp }}
+          path: ${{ runner.temp }}/oxxen-connect-backup.tar.gz.enc
+          retention-days: 90
+          if-no-files-found: error

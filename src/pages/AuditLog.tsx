@@ -7,7 +7,6 @@ type AuditRow = {
   id: string
   action: string
   entity_type: string
-  entity_id: string | null
   created_at: string
   card_id: string | null
   metadata: { changed_fields?: string[]; order_code?: string; order_id?: string } | null
@@ -50,7 +49,7 @@ export function AuditLog() {
     setError(false)
     const { data, error: loadError } = await supabase
       .from('oxxen_connect_audit_logs')
-      .select('id,action,entity_type,entity_id,created_at,card_id,metadata,oxxen_connect_cards(full_name,slug)')
+      .select('id,action,entity_type,created_at,card_id,metadata,oxxen_connect_cards(full_name,slug)')
       .order('created_at', { ascending: false })
       .limit(100)
     if (loadError) setError(true)
@@ -61,7 +60,7 @@ export function AuditLog() {
   useEffect(() => { void load() }, [])
 
   const entityLabel = (row: AuditRow) => {
-    if (row.entity_type === 'order') return row.metadata?.order_code || `Pedido ${row.entity_id?.slice(0, 8) || ''}`
+    if (row.entity_type === 'order') return row.metadata?.order_code || 'Pedido'
     if (row.entity_type === 'order_item') return `Item · pedido ${row.metadata?.order_id?.slice(0, 8) || '—'}`
     if (row.oxxen_connect_cards) return `${row.oxxen_connect_cards.full_name} · /p/${row.oxxen_connect_cards.slug}`
     return row.entity_type || 'Registro administrativo'

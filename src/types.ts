@@ -1,4 +1,5 @@
 export type ThemeMode = 'dark' | 'light'
+export type AdminRole = 'OWNER' | 'ADMIN' | 'EDITOR' | 'SUPPORT' | 'SALES'
 
 export type CardRecord = {
   id: string
@@ -62,4 +63,20 @@ export type AnalyticsEvent = {
   card_id: string
   event_type: string
   created_at: string
+}
+
+export type AnalyticsSummary = {
+  card_id: string
+  views: number
+  whatsapp: number
+  phone: number
+  email: number
+  website: number
+  instagram: number
+  facebook: number
+  tiktok: number
+  linkedin: number
+  maps: number
+  vcard: number
+  share: number
 }

@@ -7,6 +7,7 @@ import { Dashboard } from './pages/Dashboard'
 import { Cards } from './pages/Cards'
 import { CardEditor } from './pages/CardEditor'
 import { PublicCard } from './pages/PublicCard'
+import { AuditLog } from './pages/AuditLog'
 
 export default function App() {
   return (
@@ -21,6 +22,7 @@ export default function App() {
             <Route path="clientes" element={<Cards/>}/>
             <Route path="clientes/nuevo" element={<CardEditor/>}/>
             <Route path="clientes/:id" element={<CardEditor/>}/>
+            <Route path="actividad" element={<AuditLog/>}/>
           </Route>
         </Route>
         <Route path="*" element={<div className="screen-center"><div className="empty-state"><h2>404</h2><p>Página no encontrada.</p></div></div>}/>

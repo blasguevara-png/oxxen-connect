@@ -5,6 +5,7 @@ import QRCode from 'qrcode'
 import { CardPreview } from '../components/CardPreview'
 import { Loading } from '../components/Loading'
 import { copyText, downloadText, LINK_ORDER, publicCardUrl, slugify } from '../lib/helpers'
+import { optimizeImage, storagePathFromPublicUrl } from '../lib/images'
 import { supabase } from '../lib/supabase'
 import type { CardDraft, CardRecord, ThemeMode } from '../types'
 
@@ -22,6 +23,7 @@ export function CardEditor() {
   const [publicId, setPublicId] = useState('')
   const [loading, setLoading] = useState(!isNew)
   const [saving, setSaving] = useState(false)
+  const [processingMedia, setProcessingMedia] = useState(false)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
   const [profileFile, setProfileFile] = useState<File | null>(null)
@@ -35,7 +37,7 @@ export function CardEditor() {
     if (!id) return
     const load = async () => {
       const { data, error: loadError } = await supabase.from('oxxen_connect_cards').select('*').eq('id', id).single()
-      if (loadError) setError(loadError.message)
+      if (loadError) setError('No pudimos cargar esta tarjeta. Intenta nuevamente.')
       else {
         const card = data as CardRecord
         const { id: _id, public_id, deleted_at: _deletedAt, created_at: _created, updated_at: _updated, ...rest } = card
@@ -54,51 +56,88 @@ export function CardEditor() {
       return
     }
     const url = publicCardUrl(publicId)
-    void QRCode.toDataURL(url, { width: 640, margin: 2 }).then(setQrData)
-    void QRCode.toString(url, { type: 'svg', margin: 2 }).then(setQrSvg)
+    void QRCode.toDataURL(url, { width: 1600, margin: 4, errorCorrectionLevel: 'M' }).then(setQrData)
+    void QRCode.toString(url, { type: 'svg', margin: 4, errorCorrectionLevel: 'M' }).then(setQrSvg)
   }, [publicId])
 
   useEffect(() => {
     if (window.location.hash === '#qr') setTimeout(()=>document.getElementById('qr')?.scrollIntoView({ behavior: 'smooth' }), 250)
   }, [loading])
 
+  useEffect(() => () => {
+    if (profilePreview.startsWith('blob:')) URL.revokeObjectURL(profilePreview)
+    if (logoPreview.startsWith('blob:')) URL.revokeObjectURL(logoPreview)
+  }, [profilePreview, logoPreview])
+
   const previewDraft = useMemo(() => ({ ...draft, profile_image_url: profilePreview || draft.profile_image_url, logo_url: logoPreview || draft.logo_url }), [draft, profilePreview, logoPreview])
 
   const setField = (key: keyof CardDraft, value: string | boolean | ThemeMode) => setDraft(prev => ({ ...prev, [key]: value }))
   const nameChange = (value: string) => setDraft(prev => ({ ...prev, full_name: value, slug: prev.slug || slugify(value) }))
 
-  const chooseFile = (kind: 'profile' | 'logo', e: ChangeEvent<HTMLInputElement>) => {
+  const chooseFile = async (kind: 'profile' | 'logo', e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
+    e.target.value = ''
     if (!file) return
-    if (file.size > 5 * 1024 * 1024) return alert('La imagen debe pesar menos de 5 MB.')
-    const url = URL.createObjectURL(file)
-    if (kind === 'profile') { setProfileFile(file); setProfilePreview(url) }
-    else { setLogoFile(file); setLogoPreview(url) }
+    setProcessingMedia(true)
+    setError('')
+    try {
+      const optimized = await optimizeImage(file, kind)
+      const url = URL.createObjectURL(optimized)
+      if (kind === 'profile') {
+        if (profilePreview.startsWith('blob:')) URL.revokeObjectURL(profilePreview)
+        setProfileFile(optimized)
+        setProfilePreview(url)
+      } else {
+        if (logoPreview.startsWith('blob:')) URL.revokeObjectURL(logoPreview)
+        setLogoFile(optimized)
+        setLogoPreview(url)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo procesar la imagen.')
+    } finally {
+      setProcessingMedia(false)
+    }
   }
 
   async function upload(cardId: string, file: File, kind: 'profile' | 'logo') {
-    const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg'
-    const path = `${cardId}/${kind}-${Date.now()}.${ext}`
-    const { error: uploadError } = await supabase.storage.from('oxxen-connect-media').upload(path, file, { upsert: true })
-    if (uploadError) throw uploadError
-    return supabase.storage.from('oxxen-connect-media').getPublicUrl(path).data.publicUrl
+    const path = `${cardId}/${kind}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}.webp`
+    const { data, error: uploadError } = await supabase.storage.from('oxxen-connect-media').upload(path, file, {
+      upsert: false,
+      contentType: 'image/webp',
+      cacheControl: '31536000',
+    })
+    if (uploadError) throw new Error('No se pudo subir la imagen. Intenta nuevamente.')
+    const publicUrl = supabase.storage.from('oxxen-connect-media').getPublicUrl(data.path).data.publicUrl
+    return { publicUrl, path: data.path }
+  }
+
+  async function removeStoredMedia(url: string | null | undefined) {
+    const path = storagePathFromPublicUrl(url)
+    if (!path) return
+    await supabase.storage.from('oxxen-connect-media').remove([path])
   }
 
   const validateSlug = async () => {
-    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(draft.slug)) throw new Error('El slug solo puede usar minúsculas, números y guiones.')
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(draft.slug)) throw new Error('El alias solo puede usar minúsculas, números y guiones.')
     let q = supabase.from('oxxen_connect_cards').select('id').eq('slug', draft.slug)
     if (id) q = q.neq('id', id)
-    const { data, error: slugError } = await q.limit(1)
-    if (slugError) throw slugError
-    if (data?.length) throw new Error('Ese slug ya está siendo utilizado por otro cliente.')
+    const [cardsResult, aliasResult] = await Promise.all([
+      q.limit(1),
+      supabase.from('oxxen_connect_card_aliases').select('card_id').eq('alias', draft.slug).limit(2),
+    ])
+    if (cardsResult.error || aliasResult.error) throw new Error('No se pudo validar el alias. Intenta nuevamente.')
+    if (cardsResult.data?.length) throw new Error('Ese alias ya está siendo utilizado por otro cliente.')
+    if ((aliasResult.data || []).some(row => row.card_id !== id)) throw new Error('Ese alias pertenece al historial permanente de otra tarjeta y no puede reutilizarse.')
   }
 
   const save = async (e: FormEvent) => {
     e.preventDefault()
+    if (processingMedia) return
     setError(''); setSaving(true); setSaved(false)
+    const uploadedPaths: string[] = []
     try {
       if (!draft.full_name.trim()) throw new Error('El nombre es obligatorio.')
-      if (!draft.slug.trim()) throw new Error('El slug es obligatorio.')
+      if (!draft.slug.trim()) throw new Error('El alias es obligatorio.')
       await validateSlug()
 
       const payload = { ...draft, full_name: draft.full_name.trim(), slug: draft.slug.trim(), links_order: draft.links_order }
@@ -107,24 +146,40 @@ export function CardEditor() {
 
       if (id) {
         const { error: updateError } = await supabase.from('oxxen_connect_cards').update(payload).eq('id', id)
-        if (updateError) throw updateError
+        if (updateError) throw new Error('No se pudo guardar la tarjeta. Revisa los datos e intenta nuevamente.')
       } else {
         const { data, error: insertError } = await supabase.from('oxxen_connect_cards').insert(payload).select('id,public_id').single()
-        if (insertError) throw insertError
+        if (insertError) throw new Error('No se pudo crear la tarjeta. Revisa el alias e intenta nuevamente.')
         cardId = data.id
         permanentId = data.public_id
         setPublicId(data.public_id)
       }
 
+      const oldProfileUrl = draft.profile_image_url
+      const oldLogoUrl = draft.logo_url
       const mediaUpdates: Record<string, string> = {}
-      if (cardId && profileFile) mediaUpdates.profile_image_url = await upload(cardId, profileFile, 'profile')
-      if (cardId && logoFile) mediaUpdates.logo_url = await upload(cardId, logoFile, 'logo')
+      if (cardId && profileFile) {
+        const uploaded = await upload(cardId, profileFile, 'profile')
+        mediaUpdates.profile_image_url = uploaded.publicUrl
+        uploadedPaths.push(uploaded.path)
+      }
+      if (cardId && logoFile) {
+        const uploaded = await upload(cardId, logoFile, 'logo')
+        mediaUpdates.logo_url = uploaded.publicUrl
+        uploadedPaths.push(uploaded.path)
+      }
       if (cardId && Object.keys(mediaUpdates).length) {
         const { error: mediaError } = await supabase.from('oxxen_connect_cards').update(mediaUpdates).eq('id', cardId)
-        if (mediaError) throw mediaError
+        if (mediaError) throw new Error('La tarjeta se guardó, pero no se pudieron vincular las imágenes nuevas.')
+        if (mediaUpdates.profile_image_url) await removeStoredMedia(oldProfileUrl)
+        if (mediaUpdates.logo_url) await removeStoredMedia(oldLogoUrl)
         setDraft(prev => ({ ...prev, ...mediaUpdates }))
+        uploadedPaths.length = 0
       }
 
+      if (profilePreview.startsWith('blob:')) URL.revokeObjectURL(profilePreview)
+      if (logoPreview.startsWith('blob:')) URL.revokeObjectURL(logoPreview)
+      setProfilePreview(''); setLogoPreview('')
       setProfileFile(null); setLogoFile(null); setSaved(true)
       if (!id && cardId) navigate(`/admin/clientes/${cardId}`, { replace: true })
       if (!permanentId && cardId) {
@@ -133,13 +188,14 @@ export function CardEditor() {
       }
       setTimeout(()=>setSaved(false), 2200)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo guardar')
+      if (uploadedPaths.length) await supabase.storage.from('oxxen-connect-media').remove(uploadedPaths)
+      setError(err instanceof Error ? err.message : 'No se pudo guardar la tarjeta.')
     } finally { setSaving(false) }
   }
 
   const downloadPng = () => {
     if (!qrData || !publicId) return
-    const a = document.createElement('a'); a.href = qrData; a.download = `qr-${draft.slug || publicId}.png`; a.click()
+    const a = document.createElement('a'); a.href = qrData; a.download = `qr-${draft.slug || publicId}-1600px.png`; a.click()
   }
 
   if (loading) return <Loading/>
@@ -154,7 +210,8 @@ export function CardEditor() {
             <div className="grid-2"><Field label="Cargo"><input value={draft.job_title || ''} onChange={e=>setField('job_title', e.target.value)} /></Field><Field label="Alias público"><div className="prefix-input"><span>/p/</span><input value={draft.slug} onChange={e=>setField('slug', slugify(e.target.value))} required /></div><small>El alias puede cambiar. El QR/NFC usa un identificador permanente independiente.</small></Field></div>
             {publicId ? <div className="nfc-note"><strong><LockKeyhole size={14}/> URL permanente protegida</strong><p>{publicCardUrl(publicId)}</p><p>Está vinculada al QR/NFC físico y no puede modificarse.</p></div> : <div className="nfc-note"><strong><LockKeyhole size={14}/> URL permanente</strong><p>Se generará automáticamente al guardar la tarjeta por primera vez.</p></div>}
             <Field label="Descripción corta"><textarea rows={3} value={draft.bio || ''} onChange={e=>setField('bio', e.target.value)} maxLength={220}/></Field>
-            <div className="upload-grid"><UploadBox label="Foto de perfil" preview={profilePreview || draft.profile_image_url || ''} onChange={e=>chooseFile('profile', e)}/><UploadBox label="Logo / banner actual" preview={logoPreview || draft.logo_url || ''} onChange={e=>chooseFile('logo', e)}/></div>
+            <div className="upload-grid"><UploadBox label="Foto de perfil" preview={profilePreview || draft.profile_image_url || ''} onChange={e=>void chooseFile('profile', e)}/><UploadBox label="Logo / banner actual" preview={logoPreview || draft.logo_url || ''} onChange={e=>void chooseFile('logo', e)}/></div>
+            {processingMedia && <small>Optimizando imagen antes de subirla…</small>}
           </Section>
 
           <Section title="Contacto">
@@ -174,12 +231,12 @@ export function CardEditor() {
           </Section>
 
           {error && <div className="error-box">{error}</div>}
-          <button className="primary-button save-button" disabled={saving}><Save size={18}/>{saving ? 'Guardando...' : saved ? <><Check size={18}/> Guardado</> : 'Guardar tarjeta'}</button>
+          <button className="primary-button save-button" disabled={saving || processingMedia}><Save size={18}/>{saving ? 'Guardando...' : saved ? <><Check size={18}/> Guardado</> : 'Guardar tarjeta'}</button>
         </div>
 
         <aside className="editor-aside">
           <div className="sticky-preview"><h3>Vista previa móvil</h3><CardPreview card={previewDraft}/></div>
-          {publicId ? <div id="qr" className="panel qr-panel"><div className="panel-title"><QrCode size={20}/><h3>QR + NFC permanente</h3></div>{qrData && <img className="qr-image" src={qrData} alt={`QR de ${draft.slug}`} />}<code>{publicCardUrl(publicId)}</code><div className="button-row"><button type="button" className="ghost-button" onClick={()=>copyText(publicCardUrl(publicId))}><Copy size={16}/> Copiar URL</button><button type="button" className="ghost-button" onClick={downloadPng}><Download size={16}/> PNG</button><button type="button" className="ghost-button" onClick={()=>downloadText(`qr-${draft.slug || publicId}.svg`, qrSvg, 'image/svg+xml')}><Download size={16}/> SVG</button></div><div className="nfc-note"><strong>URL para grabar en NFC</strong><p>Esta URL no depende del nombre ni del alias. Puedes editar los datos sin reprogramar la tarjeta física.</p></div></div> : <div className="panel qr-panel"><div className="panel-title"><QrCode size={20}/><h3>QR + NFC</h3></div><p>Guarda primero la tarjeta para generar su URL permanente y su QR definitivo.</p></div>}
+          {publicId ? <div id="qr" className="panel qr-panel"><div className="panel-title"><QrCode size={20}/><h3>QR + NFC permanente</h3></div>{qrData && <img className="qr-image" src={qrData} alt={`QR de ${draft.slug}`} />}<code>{publicCardUrl(publicId)}</code><div className="button-row"><button type="button" className="ghost-button" onClick={()=>copyText(publicCardUrl(publicId))}><Copy size={16}/> Copiar URL</button><button type="button" className="ghost-button" onClick={downloadPng}><Download size={16}/> PNG alta calidad</button><button type="button" className="ghost-button" onClick={()=>downloadText(`qr-${draft.slug || publicId}.svg`, qrSvg, 'image/svg+xml')}><Download size={16}/> SVG</button></div><div className="nfc-note"><strong>URL para grabar en NFC</strong><p>Esta URL no depende del nombre ni del alias. Puedes editar los datos sin reprogramar la tarjeta física.</p></div></div> : <div className="panel qr-panel"><div className="panel-title"><QrCode size={20}/><h3>QR + NFC</h3></div><p>Guarda primero la tarjeta para generar su URL permanente y su QR definitivo.</p></div>}
         </aside>
       </form>
     </div>
@@ -188,4 +245,4 @@ export function CardEditor() {
 
 function Section({ title, children }: { title: string; children: ReactNode }) { return <section className="panel form-section"><h2>{title}</h2>{children}</section> }
 function Field({ label, children }: { label: string; children: ReactNode }) { return <label className="field"><span>{label}</span>{children}</label> }
-function UploadBox({ label, preview, onChange }: { label: string; preview: string; onChange: (e: ChangeEvent<HTMLInputElement>)=>void }) { return <label className="upload-box"><span>{label}</span><div className="upload-preview">{preview ? <img src={preview} alt={label}/> : <ImagePlus size={28}/>}</div><input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={onChange}/><small>PNG, JPG, WEBP o SVG · máx. 5 MB</small></label> }
+function UploadBox({ label, preview, onChange }: { label: string; preview: string; onChange: (e: ChangeEvent<HTMLInputElement>)=>void }) { return <label className="upload-box"><span>{label}</span><div className="upload-preview">{preview ? <img src={preview} alt={label}/> : <ImagePlus size={28}/>}</div><input type="file" accept="image/png,image/jpeg,image/webp" onChange={onChange}/><small>JPG, PNG o WEBP · se optimiza automáticamente</small></label> }

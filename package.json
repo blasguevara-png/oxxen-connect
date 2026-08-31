@@ -12,7 +12,10 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "backup:export": "node scripts/export-backup.mjs",
+    "backup:restore": "node scripts/restore-backup.mjs",
+    "media:migrate": "node scripts/migrate-legacy-media.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

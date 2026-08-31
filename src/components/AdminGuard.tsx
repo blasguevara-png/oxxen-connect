@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import type { User } from '@supabase/supabase-js'
+import { roleRequiresMfa } from '../lib/mfa-policy'
 import { supabase } from '../lib/supabase'
 import { Loading } from './Loading'
-import { MfaGate, roleRequiresMfa } from './MfaGate'
+import { MfaGate } from './MfaGate'
 
 export function AdminGuard() {
   const [user, setUser] = useState<User | null>(null)

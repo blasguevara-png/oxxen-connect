@@ -1,4 +1,4 @@
-import { ExternalLink, History, LayoutDashboard, LogOut, Plus, Users } from 'lucide-react'
+import { ClipboardList, ExternalLink, History, LayoutDashboard, LogOut, Plus, Users } from 'lucide-react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { Brand } from './Brand'
@@ -18,6 +18,7 @@ export function AdminLayout() {
         <nav>
           <NavLink to="/admin" end><LayoutDashboard size={18}/> Dashboard</NavLink>
           <NavLink to="/admin/clientes"><Users size={18}/> Clientes</NavLink>
+          <NavLink to="/admin/pedidos"><ClipboardList size={18}/> Pedidos</NavLink>
           <NavLink to="/admin/clientes/nuevo"><Plus size={18}/> Nueva tarjeta</NavLink>
           <NavLink to="/admin/actividad"><History size={18}/> Actividad</NavLink>
         </nav>

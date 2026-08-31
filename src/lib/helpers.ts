@@ -12,7 +12,7 @@ export const LINK_ORDER = [
   'linkedin',
 ] as const
 
-const DEFAULT_PUBLIC_BASE_URL = 'https://oxxen-connect.vercel.app'
+const DEFAULT_PUBLIC_BASE_URL = 'https://connect.oxxengroup.com'
 
 export function slugify(value: string) {
   return value

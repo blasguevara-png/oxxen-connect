@@ -4,7 +4,7 @@ import { useParams } from 'react-router-dom'
 import { Brand } from '../components/Brand'
 import { Loading } from '../components/Loading'
 import { trackEvent } from '../lib/analytics'
-import { cleanPhone, normalizeUrl, whatsappUrl } from '../lib/helpers'
+import { cleanPhone, normalizeUrl, publicBaseUrl, publicCardUrl, whatsappUrl } from '../lib/helpers'
 import { supabase } from '../lib/supabase'
 import type { PublicCardRecord } from '../types'
 
@@ -54,6 +54,27 @@ export function PublicCard() {
     trackEvent(card.public_id, 'view', { path: window.location.pathname })
   }, [card])
 
+  useEffect(() => {
+    if (!card) return
+    const canonicalUrl = publicCardUrl(card.public_id)
+    let canonical = document.querySelector<HTMLLinkElement>('link[rel="canonical"]')
+    const created = !canonical
+    const previousHref = canonical?.getAttribute('href') || ''
+
+    if (!canonical) {
+      canonical = document.createElement('link')
+      canonical.rel = 'canonical'
+      document.head.appendChild(canonical)
+    }
+    canonical.href = canonicalUrl
+
+    return () => {
+      if (!canonical) return
+      if (created) canonical.remove()
+      else canonical.setAttribute('href', previousHref)
+    }
+  }, [card])
+
   const actionMap = useMemo(
     () => card ? buildActions(card) : new Map<string, { label: string; href: string; icon: ReactNode; external?: boolean }>(),
     [card],
@@ -78,9 +99,10 @@ export function PublicCard() {
   }
   const share = async () => {
     trackEvent(card.public_id, 'share')
+    const shareUrl = publicCardUrl(card.public_id)
     try {
-      if (navigator.share) await navigator.share({ title: card.full_name, text: card.company || '', url: window.location.href })
-      else await navigator.clipboard.writeText(window.location.href)
+      if (navigator.share) await navigator.share({ title: card.full_name, text: card.company || '', url: shareUrl })
+      else await navigator.clipboard.writeText(shareUrl)
     } catch {
       // Native share sheets may be cancelled by the user; that is not an app error.
     }
@@ -111,7 +133,7 @@ export function PublicCard() {
 
 function openContactEditor(card: PublicCardRecord) {
   const isAndroid = /Android/i.test(navigator.userAgent)
-  const fallback = `${window.location.origin}/api/contact?id=${encodeURIComponent(card.public_id)}`
+  const fallback = `${publicBaseUrl()}/api/contact?id=${encodeURIComponent(card.public_id)}`
 
   if (isAndroid) {
     const phone = cleanPhone(card.phone || card.whatsapp)

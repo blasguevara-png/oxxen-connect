@@ -1,4 +1,18 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "redirects": [
+    {
+      "source": "/p/:identifier",
+      "has": [
+        {
+          "type": "host",
+          "value": "oxxen-connect.vercel.app"
+        }
+      ],
+      "destination": "https://connect.oxxengroup.com/p/:identifier",
+      "permanent": true
+    }
+  ],
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
   ]

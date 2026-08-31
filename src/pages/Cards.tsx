@@ -3,14 +3,14 @@ import { Archive, Copy, Edit3, Eye, Plus, QrCode, RotateCcw, Search } from 'luci
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { copyText, publicCardUrl } from '../lib/helpers'
-import type { AnalyticsEvent, CardRecord } from '../types'
+import type { AnalyticsSummary, CardRecord } from '../types'
 import { Loading } from '../components/Loading'
 
 type Filter = 'all' | 'active' | 'inactive' | 'archived'
 
 export function Cards() {
   const [cards, setCards] = useState<CardRecord[]>([])
-  const [events, setEvents] = useState<AnalyticsEvent[]>([])
+  const [summaries, setSummaries] = useState<AnalyticsSummary[]>([])
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
   const [loading, setLoading] = useState(true)
@@ -20,19 +20,19 @@ export function Cards() {
   const load = async () => {
     setLoading(true)
     setLoadError('')
-    const [cardsRes, eventsRes] = await Promise.all([
+    const [cardsRes, analyticsRes] = await Promise.all([
       supabase.from('oxxen_connect_cards').select('*').order('created_at', { ascending: false }),
-      supabase.from('oxxen_connect_analytics_events').select('id,card_id,event_type,created_at'),
+      supabase.rpc('get_card_analytics_summary', { p_from: null, p_to: null }),
     ])
 
-    if (cardsRes.error || eventsRes.error) {
-      setLoadError(cardsRes.error?.message || eventsRes.error?.message || 'No pudimos cargar los clientes.')
+    if (cardsRes.error || analyticsRes.error) {
+      setLoadError(cardsRes.error?.message || analyticsRes.error?.message || 'No pudimos cargar los clientes.')
       setLoading(false)
       return
     }
 
     setCards((cardsRes.data || []) as CardRecord[])
-    setEvents((eventsRes.data || []) as AnalyticsEvent[])
+    setSummaries((analyticsRes.data || []) as AnalyticsSummary[])
     setLoading(false)
   }
 
@@ -49,27 +49,22 @@ export function Cards() {
   }), [cards, query, filter])
 
   const counts = useMemo(() => {
-    const map = new Map<string, { views: number; whatsapp: number }>()
-    for (const e of events) {
-      const item = map.get(e.card_id) || { views: 0, whatsapp: 0 }
-      if (e.event_type === 'view') item.views++
-      if (e.event_type === 'whatsapp') item.whatsapp++
-      map.set(e.card_id, item)
-    }
+    const map = new Map<string, AnalyticsSummary>()
+    for (const row of summaries) map.set(row.card_id, row)
     return map
-  }, [events])
+  }, [summaries])
 
   const archive = async (card: CardRecord) => {
     if (!confirm(`¿Archivar la tarjeta de ${card.full_name}? El QR/NFC y las estadísticas se conservarán.`)) return
     const { error } = await supabase.from('oxxen_connect_cards').update({ deleted_at: new Date().toISOString(), active: false }).eq('id', card.id)
-    if (error) return alert(error.message)
+    if (error) return alert('No se pudo archivar la tarjeta. Intenta nuevamente.')
     setNotice(`Tarjeta archivada: ${card.full_name}`)
     void load()
   }
 
   const restore = async (card: CardRecord) => {
     const { error } = await supabase.from('oxxen_connect_cards').update({ deleted_at: null, active: true }).eq('id', card.id)
-    if (error) return alert(error.message)
+    if (error) return alert('No se pudo restaurar la tarjeta. Intenta nuevamente.')
     setNotice(`Tarjeta restaurada: ${card.full_name}`)
     void load()
   }
@@ -77,7 +72,7 @@ export function Cards() {
   const toggle = async (card: CardRecord) => {
     if (card.deleted_at) return
     const { error } = await supabase.from('oxxen_connect_cards').update({ active: !card.active }).eq('id', card.id)
-    if (error) return alert(error.message)
+    if (error) return alert('No se pudo cambiar el estado del perfil.')
     void load()
   }
 
@@ -98,7 +93,7 @@ export function Cards() {
         {notice && <span className="success-note">{notice}</span>}
       </div>
 
-      {loading ? <Loading/> : loadError ? <div className="empty-state"><h2>No pudimos cargar los clientes</h2><p>{loadError}</p><button className="primary-button" onClick={()=>void load()}>Reintentar</button></div> : filtered.length === 0 ? <div className="empty-state"><h2>{cards.length ? 'No hay resultados' : 'No hay tarjetas'}</h2><p>{cards.length ? 'Prueba otro filtro o búsqueda.' : 'Crea tu primer cliente para empezar.'}</p></div> : (
+      {loading ? <Loading/> : loadError ? <div className="empty-state"><h2>No pudimos cargar los clientes</h2><p>Ocurrió un problema temporal al consultar la plataforma.</p><button className="primary-button" onClick={()=>void load()}>Reintentar</button></div> : filtered.length === 0 ? <div className="empty-state"><h2>{cards.length ? 'No hay resultados' : 'No hay tarjetas'}</h2><p>{cards.length ? 'Prueba otro filtro o búsqueda.' : 'Crea tu primer cliente para empezar.'}</p></div> : (
         <div className="table-wrap"><table><thead><tr><th>Cliente</th><th>URL permanente</th><th>Estado</th><th>Vistas</th><th>WhatsApp</th><th>Acciones</th></tr></thead><tbody>
           {filtered.map(card => {
             const stats = counts.get(card.id) || { views: 0, whatsapp: 0 }

@@ -16,28 +16,38 @@ export function Login() {
     e.preventDefault()
     setError('')
     setLoading(true)
-    const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password })
-    if (authError || !data.user) {
-      setError(authError?.message || 'No se pudo iniciar sesión')
+    try {
+      const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password })
+      if (authError || !data.user) {
+        setError('Correo o contraseña incorrectos.')
+        return
+      }
+
+      const { data: admin, error: adminError } = await supabase
+        .from('oxxen_connect_admins')
+        .select('user_id,role')
+        .eq('user_id', data.user.id)
+        .maybeSingle()
+
+      if (adminError) {
+        await supabase.auth.signOut()
+        setError('No pudimos verificar tus permisos. Intenta nuevamente.')
+        return
+      }
+
+      if (!admin) {
+        await supabase.auth.signOut()
+        setError('Esta cuenta no tiene permisos de administrador.')
+        return
+      }
+
+      const from = (location.state as { from?: string } | null)?.from || '/admin'
+      navigate(from, { replace: true })
+    } catch {
+      setError('No se pudo iniciar sesión. Verifica tu conexión e intenta nuevamente.')
+    } finally {
       setLoading(false)
-      return
     }
-
-    const { data: admin } = await supabase
-      .from('oxxen_connect_admins')
-      .select('user_id')
-      .eq('user_id', data.user.id)
-      .maybeSingle()
-
-    if (!admin) {
-      await supabase.auth.signOut()
-      setError('Esta cuenta no tiene permisos de administrador.')
-      setLoading(false)
-      return
-    }
-
-    const from = (location.state as { from?: string } | null)?.from || '/admin'
-    navigate(from, { replace: true })
   }
 
   return (

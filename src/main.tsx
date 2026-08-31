@@ -6,6 +6,7 @@ import { NetworkStatus } from './components/NetworkStatus'
 import './styles.css'
 import './logo-overrides.css'
 import './sprint2.css'
+import './mfa.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

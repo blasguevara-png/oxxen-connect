@@ -3,12 +3,6 @@ import { KeyRound, LogOut, ShieldCheck } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { Brand } from './Brand'
 
-export const MFA_REQUIRED_ROLES = new Set(['OWNER'])
-
-export function roleRequiresMfa(role: string | null) {
-  return Boolean(role && MFA_REQUIRED_ROLES.has(role))
-}
-
 type Mode = 'loading' | 'enroll' | 'challenge'
 
 type Props = {

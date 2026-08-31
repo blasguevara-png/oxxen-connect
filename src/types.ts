@@ -1,5 +1,27 @@
 export type ThemeMode = 'dark' | 'light'
 export type AdminRole = 'OWNER' | 'ADMIN' | 'EDITOR' | 'SUPPORT' | 'SALES'
+export type CustomerStatus = 'lead' | 'active' | 'inactive' | 'blocked'
+export type CustomerDocumentType = 'DNI' | 'RUC' | 'CE' | 'PASSPORT' | 'OTHER'
+
+export type CustomerRecord = {
+  id: string
+  customer_number: number
+  customer_code: string
+  business_name: string | null
+  contact_name: string | null
+  email: string | null
+  phone: string | null
+  whatsapp: string | null
+  document_type: CustomerDocumentType | null
+  document_number: string | null
+  address: string | null
+  notes: string | null
+  status: CustomerStatus
+  created_at: string
+  updated_at: string
+}
+
+export type CustomerDraft = Omit<CustomerRecord, 'id' | 'customer_number' | 'customer_code' | 'created_at' | 'updated_at'>
 
 export type CardRecord = {
   id: string
@@ -25,6 +47,7 @@ export type CardRecord = {
   profile_image_url: string | null
   logo_url: string | null
   active: boolean
+  customer_id?: string | null
   deleted_at: string | null
   links_order: string[]
   created_at: string

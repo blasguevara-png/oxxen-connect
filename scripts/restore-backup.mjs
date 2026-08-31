@@ -16,9 +16,11 @@ async function readJson(filename, fallback) {
 }
 
 const manifest = await readJson('manifest.json')
-// Backward-compatible with Sprint 2 backups created before customers existed.
+// Backward-compatible with Sprint 2 / S3.1 backups created before orders existed.
 const customers = await readJson('oxxen_connect_customers.json', [])
+const orders = await readJson('oxxen_connect_orders.json', [])
 const cards = await readJson('oxxen_connect_cards.json')
+const orderItems = await readJson('oxxen_connect_order_items.json', [])
 const aliases = await readJson('oxxen_connect_card_aliases.json')
 const admins = await readJson('oxxen_connect_admins.json')
 const analytics = await readJson('oxxen_connect_analytics_events.json')
@@ -42,10 +44,22 @@ if (cards.some(card => card.customer_id && !customerIds.has(card.customer_id))) 
   throw new Error('Backup inválido: tarjeta vinculada a un cliente ausente.')
 }
 
+const orderIds = new Set(orders.map(order => order.id))
+const orderCodes = new Set(orders.map(order => order.order_code))
+const orderNumbers = new Set(orders.map(order => order.order_number))
+if (orderIds.size !== orders.length) throw new Error('Backup inválido: order id duplicado.')
+if (orderCodes.size !== orders.length) throw new Error('Backup inválido: order_code duplicado.')
+if (orderNumbers.size !== orders.length) throw new Error('Backup inválido: order_number duplicado.')
+if (orders.some(order => !customerIds.has(order.customer_id))) throw new Error('Backup inválido: pedido vinculado a un cliente ausente.')
+if (orderItems.some(item => !orderIds.has(item.order_id))) throw new Error('Backup inválido: item vinculado a un pedido ausente.')
+if (orderItems.some(item => item.card_id && !cardIds.has(item.card_id))) throw new Error('Backup inválido: item vinculado a una tarjeta ausente.')
+
 console.log('Validación OK', {
   generated_at: manifest.generated_at,
   customers: customers.length,
+  orders: orders.length,
   cards: cards.length,
+  orderItems: orderItems.length,
   aliases: aliases.length,
   admins: admins.length,
   analytics: analytics.length,
@@ -69,17 +83,25 @@ async function upsertBatches(table, rows, onConflict = 'id') {
   }
 }
 
-// Preserve original customer ids/codes/numbers before cards so the FK is valid.
+// Preserve original customer ids/codes/numbers before dependent orders/cards.
 await upsertBatches('oxxen_connect_customers', customers)
 if (customers.length) {
   const { error } = await supabase.rpc('oxxen_connect_sync_customer_sequence')
   if (error) throw new Error(`customer sequence: ${error.message}`)
 }
 
+// Orders depend on customers; order items depend on both orders and optionally cards.
+await upsertBatches('oxxen_connect_orders', orders)
+if (orders.length) {
+  const { error } = await supabase.rpc('oxxen_connect_sync_order_sequence')
+  if (error) throw new Error(`order sequence: ${error.message}`)
+}
+
 // Preserve original card id, public_id and aliases. Never generate replacements during restore.
 await upsertBatches('oxxen_connect_cards', cards)
+await upsertBatches('oxxen_connect_order_items', orderItems)
 await upsertBatches('oxxen_connect_card_aliases', aliases)
 await upsertBatches('oxxen_connect_admins', admins, 'user_id')
 await upsertBatches('oxxen_connect_analytics_events', analytics)
 await upsertBatches('oxxen_connect_audit_logs', audit)
-console.log('Restauración terminada. Ejecuta smoke tests de QR/NFC antes de cerrar el incidente.')
+console.log('Restauración terminada. Ejecuta smoke tests de QR/NFC y pedidos antes de cerrar el incidente.')

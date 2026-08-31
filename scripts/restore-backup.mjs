@@ -6,12 +6,23 @@ const backupDir = process.argv[2]
 const apply = process.argv.includes('--apply')
 if (!backupDir) throw new Error('Uso: node scripts/restore-backup.mjs <carpeta-backup> [--apply]')
 
-const manifest = JSON.parse(await readFile(path.join(backupDir, 'manifest.json'), 'utf8'))
-const cards = JSON.parse(await readFile(path.join(backupDir, 'oxxen_connect_cards.json'), 'utf8'))
-const aliases = JSON.parse(await readFile(path.join(backupDir, 'oxxen_connect_card_aliases.json'), 'utf8'))
-const admins = JSON.parse(await readFile(path.join(backupDir, 'oxxen_connect_admins.json'), 'utf8'))
-const analytics = JSON.parse(await readFile(path.join(backupDir, 'oxxen_connect_analytics_events.json'), 'utf8'))
-const audit = JSON.parse(await readFile(path.join(backupDir, 'oxxen_connect_audit_logs.json'), 'utf8'))
+async function readJson(filename, fallback) {
+  try {
+    return JSON.parse(await readFile(path.join(backupDir, filename), 'utf8'))
+  } catch (error) {
+    if (error?.code === 'ENOENT' && fallback !== undefined) return fallback
+    throw error
+  }
+}
+
+const manifest = await readJson('manifest.json')
+// Backward-compatible with Sprint 2 backups created before customers existed.
+const customers = await readJson('oxxen_connect_customers.json', [])
+const cards = await readJson('oxxen_connect_cards.json')
+const aliases = await readJson('oxxen_connect_card_aliases.json')
+const admins = await readJson('oxxen_connect_admins.json')
+const analytics = await readJson('oxxen_connect_analytics_events.json')
+const audit = await readJson('oxxen_connect_audit_logs.json')
 
 const publicIds = new Set(cards.map(card => card.public_id))
 if (publicIds.size !== cards.length) throw new Error('Backup inválido: public_id duplicado.')
@@ -21,7 +32,25 @@ const cardIds = new Set(cards.map(card => card.id))
 if (aliases.some(alias => !cardIds.has(alias.card_id))) throw new Error('Backup inválido: alias sin tarjeta.')
 if (analytics.some(event => !cardIds.has(event.card_id))) throw new Error('Backup inválido: analytics sin tarjeta.')
 
-console.log('Validación OK', { generated_at: manifest.generated_at, cards: cards.length, aliases: aliases.length, admins: admins.length, analytics: analytics.length, audit: audit.length })
+const customerIds = new Set(customers.map(customer => customer.id))
+const customerCodes = new Set(customers.map(customer => customer.customer_code))
+const customerNumbers = new Set(customers.map(customer => customer.customer_number))
+if (customerIds.size !== customers.length) throw new Error('Backup inválido: customer id duplicado.')
+if (customerCodes.size !== customers.length) throw new Error('Backup inválido: customer_code duplicado.')
+if (customerNumbers.size !== customers.length) throw new Error('Backup inválido: customer_number duplicado.')
+if (cards.some(card => card.customer_id && !customerIds.has(card.customer_id))) {
+  throw new Error('Backup inválido: tarjeta vinculada a un cliente ausente.')
+}
+
+console.log('Validación OK', {
+  generated_at: manifest.generated_at,
+  customers: customers.length,
+  cards: cards.length,
+  aliases: aliases.length,
+  admins: admins.length,
+  analytics: analytics.length,
+  audit: audit.length,
+})
 if (!apply) {
   console.log('Modo dry-run. No se modificó la base. Usa --apply únicamente después de revisar el backup.')
   process.exit(0)
@@ -38,6 +67,13 @@ async function upsertBatches(table, rows, onConflict = 'id') {
     const { error } = await supabase.from(table).upsert(rows.slice(i, i + batchSize), { onConflict })
     if (error) throw new Error(`${table}: ${error.message}`)
   }
+}
+
+// Preserve original customer ids/codes/numbers before cards so the FK is valid.
+await upsertBatches('oxxen_connect_customers', customers)
+if (customers.length) {
+  const { error } = await supabase.rpc('oxxen_connect_sync_customer_sequence')
+  if (error) throw new Error(`customer sequence: ${error.message}`)
 }
 
 // Preserve original card id, public_id and aliases. Never generate replacements during restore.

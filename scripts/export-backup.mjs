@@ -14,12 +14,12 @@ const outputDir = path.resolve(process.argv[2] || `backups/oxxen-connect-${stamp
 await mkdir(outputDir, { recursive: true })
 
 const tables = [
-  'oxxen_connect_customers',
-  'oxxen_connect_cards',
-  'oxxen_connect_card_aliases',
-  'oxxen_connect_admins',
-  'oxxen_connect_analytics_events',
-  'oxxen_connect_audit_logs',
+  { name: 'oxxen_connect_customers', optionalUntilMigration: true },
+  { name: 'oxxen_connect_cards' },
+  { name: 'oxxen_connect_card_aliases' },
+  { name: 'oxxen_connect_admins' },
+  { name: 'oxxen_connect_analytics_events' },
+  { name: 'oxxen_connect_audit_logs' },
 ]
 
 async function fetchAll(table) {
@@ -34,11 +34,24 @@ async function fetchAll(table) {
   return rows
 }
 
+function isMissingRelation(error) {
+  return ['PGRST205', '42P01'].includes(error?.code)
+}
+
 const counts = {}
 for (const table of tables) {
-  const rows = await fetchAll(table)
-  counts[table] = rows.length
-  await writeFile(path.join(outputDir, `${table}.json`), JSON.stringify(rows, null, 2), 'utf8')
+  let rows
+  try {
+    rows = await fetchAll(table.name)
+  } catch (error) {
+    if (table.optionalUntilMigration && isMissingRelation(error)) {
+      rows = []
+    } else {
+      throw error
+    }
+  }
+  counts[table.name] = rows.length
+  await writeFile(path.join(outputDir, `${table.name}.json`), JSON.stringify(rows, null, 2), 'utf8')
 }
 
 await writeFile(

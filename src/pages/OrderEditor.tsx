@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, Check, Plus, Save } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Loading } from '../components/Loading'
+import { NfcAssetSummary } from '../components/NfcAssetSummary'
 import { customerDisplayName } from '../lib/customers'
 import { calculateOrderTotals, canTransitionOrderStatus, money, nextOrderStatuses, ORDER_STATUS_LABELS, PAYMENT_STATUS_LABELS } from '../lib/orders'
 import { supabase } from '../lib/supabase'
@@ -180,6 +181,7 @@ export function OrderEditor() {
 
       <section className="panel form-section"><div className="panel-title"><h2>Items</h2>{order.status === 'draft' && <button className="ghost-button" disabled={saving} onClick={()=>void addItem()}><Plus size={16}/> Agregar item</button>}</div>{items.length === 0 ? <p>Este pedido todavía no tiene items.</p> : items.map((item,index)=><div className="grid-3" key={item.id}><label className="field"><span>Tipo</span><select disabled={order.status !== 'draft'} value={item.item_type} onChange={e=>setItems(prev=>prev.map((row,idx)=>idx===index?{...row,item_type:e.target.value as OrderItemType}:row))}><option value="nfc_card">Tarjeta NFC</option><option value="digital_card">Tarjeta digital</option><option value="service">Servicio</option><option value="other">Otro</option></select></label><label className="field"><span>Cantidad</span><input disabled={order.status !== 'draft'} type="number" min="1" value={item.quantity} onChange={e=>setItems(prev=>prev.map((row,idx)=>idx===index?{...row,quantity:Number(e.target.value)}:row))}/></label><label className="field"><span>Precio</span><input disabled={order.status !== 'draft'} type="number" min="0" step="0.01" value={item.unit_price} onChange={e=>setItems(prev=>prev.map((row,idx)=>idx===index?{...row,unit_price:Number(e.target.value)}:row))}/></label><label className="field"><span>Descripción</span><input disabled={order.status !== 'draft'} value={item.description || ''} onChange={e=>setItems(prev=>prev.map((row,idx)=>idx===index?{...row,description:e.target.value}:row))}/></label><div><strong>Subtotal</strong><p>{money(item.subtotal, order.currency)}</p></div>{order.status === 'draft' && <button className="ghost-button" disabled={saving} onClick={()=>void saveExistingItem(item)}>Guardar item</button>}</div>)}</section>
 
+      <NfcAssetSummary orderId={order.id} title="NFC asignados" />
       {error && <div className="error-box">{error}</div>}
     </div>
   )

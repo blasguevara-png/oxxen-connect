@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import QRCode from 'qrcode'
 import { CardPreview } from '../components/CardPreview'
 import { Loading } from '../components/Loading'
+import { NfcAssetSummary } from '../components/NfcAssetSummary'
 import { copyText, downloadText, LINK_ORDER, publicCardUrl, slugify } from '../lib/helpers'
 import { optimizeImage, storagePathFromPublicUrl } from '../lib/images'
 import { supabase } from '../lib/supabase'
@@ -237,6 +238,7 @@ export function CardEditor() {
         <aside className="editor-aside">
           <div className="sticky-preview"><h3>Vista previa móvil</h3><CardPreview card={previewDraft}/></div>
           {publicId ? <div id="qr" className="panel qr-panel"><div className="panel-title"><QrCode size={20}/><h3>QR + NFC permanente</h3></div>{qrData && <img className="qr-image" src={qrData} alt={`QR de ${draft.slug}`} />}<code>{publicCardUrl(publicId)}</code><div className="button-row"><button type="button" className="ghost-button" onClick={()=>copyText(publicCardUrl(publicId))}><Copy size={16}/> Copiar URL</button><button type="button" className="ghost-button" onClick={downloadPng}><Download size={16}/> PNG alta calidad</button><button type="button" className="ghost-button" onClick={()=>downloadText(`qr-${draft.slug || publicId}.svg`, qrSvg, 'image/svg+xml')}><Download size={16}/> SVG</button></div><div className="nfc-note"><strong>URL para grabar en NFC</strong><p>Esta URL no depende del nombre ni del alias. Puedes editar los datos sin reprogramar la tarjeta física.</p></div></div> : <div className="panel qr-panel"><div className="panel-title"><QrCode size={20}/><h3>QR + NFC</h3></div><p>Guarda primero la tarjeta para generar su URL permanente y su QR definitivo.</p></div>}
+          {id && <NfcAssetSummary cardId={id} title="NFC físico asociado" />}
         </aside>
       </form>
     </div>

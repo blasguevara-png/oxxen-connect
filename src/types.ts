@@ -5,6 +5,8 @@ export type CustomerDocumentType = 'DNI' | 'RUC' | 'CE' | 'PASSPORT' | 'OTHER'
 export type OrderStatus = 'draft' | 'confirmed' | 'in_production' | 'ready' | 'delivered' | 'cancelled'
 export type PaymentStatus = 'pending' | 'partial' | 'paid' | 'refunded'
 export type OrderItemType = 'digital_card' | 'nfc_card' | 'service' | 'other'
+export type NfcChipType = 'NTAG213' | 'NTAG215' | 'NTAG216' | 'NTAG424_DNA' | 'OTHER'
+export type NfcAssetStatus = 'available' | 'reserved' | 'programmed' | 'assigned' | 'delivered' | 'defective' | 'lost' | 'retired'
 
 export type CustomerRecord = {
   id: string
@@ -63,6 +65,28 @@ export type OrderItemRecord = {
 }
 
 export type OrderItemDraft = Pick<OrderItemRecord, 'item_type' | 'description' | 'quantity' | 'unit_price' | 'card_id'>
+
+export type NfcAssetRecord = {
+  id: string
+  asset_number: number
+  asset_code: string
+  chip_type: NfcChipType
+  uid: string | null
+  status: NfcAssetStatus
+  order_id: string | null
+  order_item_id: string | null
+  card_id: string | null
+  batch_code: string | null
+  supplier: string | null
+  purchase_cost: number | null
+  notes: string | null
+  programmed_at: string | null
+  reserved_at: string | null
+  delivered_at: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
 
 export type CardRecord = {
   id: string

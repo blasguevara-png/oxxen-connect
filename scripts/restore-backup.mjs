@@ -16,11 +16,12 @@ async function readJson(filename, fallback) {
 }
 
 const manifest = await readJson('manifest.json')
-// Backward-compatible with Sprint 2 / S3.1 backups created before orders existed.
+// Backward-compatible with Sprint 2 / S3.1 / S3.2 backups created before NFC inventory existed.
 const customers = await readJson('oxxen_connect_customers.json', [])
 const orders = await readJson('oxxen_connect_orders.json', [])
 const cards = await readJson('oxxen_connect_cards.json')
 const orderItems = await readJson('oxxen_connect_order_items.json', [])
+const nfcAssets = await readJson('oxxen_connect_nfc_assets.json', [])
 const aliases = await readJson('oxxen_connect_card_aliases.json')
 const admins = await readJson('oxxen_connect_admins.json')
 const analytics = await readJson('oxxen_connect_analytics_events.json')
@@ -54,12 +55,43 @@ if (orders.some(order => !customerIds.has(order.customer_id))) throw new Error('
 if (orderItems.some(item => !orderIds.has(item.order_id))) throw new Error('Backup inválido: item vinculado a un pedido ausente.')
 if (orderItems.some(item => item.card_id && !cardIds.has(item.card_id))) throw new Error('Backup inválido: item vinculado a una tarjeta ausente.')
 
+const orderItemIds = new Set(orderItems.map(item => item.id))
+const assetIds = new Set(nfcAssets.map(asset => asset.id))
+const assetCodes = new Set(nfcAssets.map(asset => asset.asset_code))
+const assetNumbers = new Set(nfcAssets.map(asset => asset.asset_number))
+const validChipTypes = new Set(['NTAG213', 'NTAG215', 'NTAG216', 'NTAG424_DNA', 'OTHER'])
+const validStatuses = new Set(['available', 'reserved', 'programmed', 'assigned', 'delivered', 'defective', 'lost', 'retired'])
+
+function normalizedUid(value) {
+  if (value == null || String(value).trim() === '') return null
+  const normalized = String(value).trim().toUpperCase().replace(/[\s:-]/g, '')
+  if (!/^[0-9A-F]{8,32}$/.test(normalized)) throw new Error(`Backup inválido: UID NFC con formato inválido (${value}).`)
+  return normalized
+}
+
+const uids = nfcAssets.map(asset => normalizedUid(asset.uid)).filter(Boolean)
+if (assetIds.size !== nfcAssets.length) throw new Error('Backup inválido: NFC asset id duplicado.')
+if (assetCodes.size !== nfcAssets.length) throw new Error('Backup inválido: asset_code NFC duplicado.')
+if (assetNumbers.size !== nfcAssets.length) throw new Error('Backup inválido: asset_number NFC duplicado.')
+if (new Set(uids).size !== uids.length) throw new Error('Backup inválido: UID NFC duplicado.')
+if (nfcAssets.some(asset => !validChipTypes.has(asset.chip_type))) throw new Error('Backup inválido: chip_type NFC no soportado.')
+if (nfcAssets.some(asset => !validStatuses.has(asset.status))) throw new Error('Backup inválido: status NFC no soportado.')
+if (nfcAssets.some(asset => asset.order_id && !orderIds.has(asset.order_id))) throw new Error('Backup inválido: NFC vinculado a pedido ausente.')
+if (nfcAssets.some(asset => asset.order_item_id && !orderItemIds.has(asset.order_item_id))) throw new Error('Backup inválido: NFC vinculado a order item ausente.')
+if (nfcAssets.some(asset => asset.card_id && !cardIds.has(asset.card_id))) throw new Error('Backup inválido: NFC vinculado a tarjeta ausente.')
+for (const asset of nfcAssets) {
+  if (!asset.order_item_id) continue
+  const item = orderItems.find(row => row.id === asset.order_item_id)
+  if (asset.order_id && item?.order_id !== asset.order_id) throw new Error('Backup inválido: NFC tiene order_id y order_item_id inconsistentes.')
+}
+
 console.log('Validación OK', {
   generated_at: manifest.generated_at,
   customers: customers.length,
   orders: orders.length,
   cards: cards.length,
   orderItems: orderItems.length,
+  nfcAssets: nfcAssets.length,
   aliases: aliases.length,
   admins: admins.length,
   analytics: analytics.length,
@@ -100,8 +132,13 @@ if (orders.length) {
 // Preserve original card id, public_id and aliases. Never generate replacements during restore.
 await upsertBatches('oxxen_connect_cards', cards)
 await upsertBatches('oxxen_connect_order_items', orderItems)
+await upsertBatches('oxxen_connect_nfc_assets', nfcAssets)
+if (nfcAssets.length) {
+  const { error } = await supabase.rpc('oxxen_connect_sync_nfc_asset_sequence')
+  if (error) throw new Error(`NFC asset sequence: ${error.message}`)
+}
 await upsertBatches('oxxen_connect_card_aliases', aliases)
 await upsertBatches('oxxen_connect_admins', admins, 'user_id')
 await upsertBatches('oxxen_connect_analytics_events', analytics)
 await upsertBatches('oxxen_connect_audit_logs', audit)
-console.log('Restauración terminada. Ejecuta smoke tests de QR/NFC y pedidos antes de cerrar el incidente.')
+console.log('Restauración terminada. Ejecuta smoke tests de QR/NFC, pedidos e inventario antes de cerrar el incidente.')

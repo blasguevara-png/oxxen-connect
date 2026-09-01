@@ -18,7 +18,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: npm install --no-audit --no-fund
+      - name: Install dependencies and generate npm lockfile
+        run: npm install --no-audit --no-fund
+      - name: Preserve generated lockfile for S3.4 bootstrap
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3-4-package-lock
+          path: package-lock.json
+          retention-days: 1
+          if-no-files-found: error
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run test

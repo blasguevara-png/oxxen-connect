@@ -41,8 +41,8 @@ export function formatNfcAssetCode(assetNumber: number) {
 export function normalizeNfcUid(value: string | null | undefined) {
   const raw = String(value || '').trim()
   if (!raw) return null
-  const normalized = raw.toUpperCase().replace(/[^0-9A-F]/g, '')
-  if (!normalized || !/^[0-9A-F]{8,32}$/.test(normalized)) throw new Error('UID NFC inválido.')
+  const normalized = raw.toUpperCase().replace(/[:\s-]/g, '')
+  if (!/^[0-9A-F]{8,32}$/.test(normalized)) throw new Error('UID NFC inválido.')
   return normalized
 }
 

@@ -18,6 +18,7 @@ const tables = [
   { name: 'oxxen_connect_orders', optionalUntilMigration: true },
   { name: 'oxxen_connect_cards' },
   { name: 'oxxen_connect_order_items', optionalUntilMigration: true },
+  { name: 'oxxen_connect_nfc_assets', optionalUntilMigration: true },
   { name: 'oxxen_connect_card_aliases' },
   { name: 'oxxen_connect_admins' },
   { name: 'oxxen_connect_analytics_events' },

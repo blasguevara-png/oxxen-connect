@@ -128,13 +128,15 @@ VITE_PUBLIC_BASE_URL=https://connect.oxxengroup.com
 ## Desarrollo y verificación
 
 ```bash
-npm install
+npm ci
 npm run lint
 npm run typecheck
 npm run test
 npm run build
 npm run test:e2e:critical
 ```
+
+`package-lock.json` está versionado y CI/backups usan `npm ci` para instalaciones reproducibles.
 
 CI valida lint, TypeScript, unit/contract tests, build y E2E no destructivos. El E2E autenticado mutante de Customer→Order→Card→NFC debe ejecutarse contra un Supabase staging aislado; nunca contra clientes reales de producción.
 

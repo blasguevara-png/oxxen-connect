@@ -1,0 +1,18 @@
+/*
+ * Card editor preview ergonomics.
+ *
+ * On short desktop viewports the phone mockup is taller than the usable
+ * browser area. Keeping it sticky makes the QR panel below it slide under
+ * the preview while the page scrolls. Let the preview participate in normal
+ * document flow in that case so the complete QR panel can always be reached.
+ */
+@media (min-width: 1051px) and (max-height: 900px) {
+  .sticky-preview {
+    position: static;
+  }
+}
+
+/* Hash navigation / scrollIntoView should leave the QR panel comfortably visible. */
+#qr {
+  scroll-margin-top: 24px;
+}

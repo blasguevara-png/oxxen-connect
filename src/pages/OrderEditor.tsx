@@ -1,14 +1,15 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, Check, Plus, Save } from 'lucide-react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Loading } from '../components/Loading'
 import { NfcAssetSummary } from '../components/NfcAssetSummary'
 import { customerDisplayName } from '../lib/customers'
 import { calculateOrderTotals, canTransitionOrderStatus, money, nextOrderStatuses, ORDER_STATUS_LABELS, PAYMENT_STATUS_LABELS } from '../lib/orders'
 import { supabase } from '../lib/supabase'
-import type { CustomerRecord, OrderItemDraft, OrderItemRecord, OrderItemType, OrderRecord, OrderStatus, PaymentStatus } from '../types'
+import type { CardRecord, CustomerRecord, OrderItemDraft, OrderItemRecord, OrderItemType, OrderRecord, OrderStatus, PaymentStatus } from '../types'
 
 const blankItem = (): OrderItemDraft => ({ item_type: 'nfc_card', description: 'Tarjeta NFC', quantity: 1, unit_price: 0, card_id: null })
+const supportsCard = (type: OrderItemType) => type === 'nfc_card' || type === 'digital_card'
 
 type OrderWithCustomer = OrderRecord & { customer: Pick<CustomerRecord, 'id' | 'customer_code' | 'business_name' | 'contact_name'> | null }
 
@@ -16,10 +17,13 @@ export function OrderEditor() {
   const { id } = useParams()
   const isNew = !id
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const requestedCustomerId = searchParams.get('customerId') || ''
   const [customers, setCustomers] = useState<CustomerRecord[]>([])
+  const [cards, setCards] = useState<CardRecord[]>([])
   const [order, setOrder] = useState<OrderWithCustomer | null>(null)
   const [items, setItems] = useState<OrderItemRecord[]>([])
-  const [customerId, setCustomerId] = useState('')
+  const [customerId, setCustomerId] = useState(requestedCustomerId)
   const [draftItems, setDraftItems] = useState<OrderItemDraft[]>([blankItem()])
   const [discount, setDiscount] = useState(0)
   const [notes, setNotes] = useState('')
@@ -32,13 +36,17 @@ export function OrderEditor() {
   const load = async () => {
     setLoading(true)
     setError('')
-    const customersRes = await supabase.from('oxxen_connect_customers').select('*').neq('status', 'blocked').order('created_at', { ascending: false })
-    if (customersRes.error) {
-      setError('No pudimos cargar los clientes disponibles.')
+    const [customersRes, cardsRes] = await Promise.all([
+      supabase.from('oxxen_connect_customers').select('*').neq('status', 'blocked').order('created_at', { ascending: false }),
+      supabase.from('oxxen_connect_cards').select('*').is('deleted_at', null).order('created_at', { ascending: false }),
+    ])
+    if (customersRes.error || cardsRes.error) {
+      setError('No pudimos cargar los clientes o tarjetas disponibles.')
       setLoading(false)
       return
     }
     setCustomers((customersRes.data || []) as CustomerRecord[])
+    setCards((cardsRes.data || []) as CardRecord[])
 
     if (id) {
       const [orderRes, itemsRes] = await Promise.all([
@@ -55,11 +63,15 @@ export function OrderEditor() {
         setNotes(loaded.notes || '')
         setPaymentStatus(loaded.payment_status)
       }
+    } else if (requestedCustomerId) {
+      setCustomerId(requestedCustomerId)
     }
     setLoading(false)
   }
 
-  useEffect(() => { void load() }, [id])
+  useEffect(() => { void load() }, [id, requestedCustomerId])
+
+  const cardOptions = useMemo(() => cards.filter(card => !customerId || !card.customer_id || card.customer_id === customerId), [cards, customerId])
 
   const draftTotals = useMemo(() => {
     try { return calculateOrderTotals(draftItems, discount) }
@@ -70,32 +82,30 @@ export function OrderEditor() {
     setDraftItems(prev => prev.map((item, idx) => idx === index ? { ...item, ...patch } : item))
   }
 
+  const cardLabel = (card: CardRecord) => `${card.full_name} · ${card.public_id.slice(0,8)}…${card.customer_id ? '' : ' · legacy'}`
+
   const createOrder = async (e: FormEvent) => {
     e.preventDefault()
     setSaving(true); setError(''); setSaved(false)
     try {
       if (!customerId) throw new Error('Selecciona un cliente.')
       calculateOrderTotals(draftItems, discount)
-      const { data, error: orderError } = await supabase.from('oxxen_connect_orders').insert({
-        customer_id: customerId,
-        status: 'draft',
-        payment_status: 'pending',
-        currency: 'PEN',
-        discount,
-        notes: notes.trim() || null,
-      }).select('id').single()
-      if (orderError || !data) throw new Error('No se pudo crear el pedido.')
-
-      const { error: itemsError } = await supabase.from('oxxen_connect_order_items').insert(draftItems.map(item => ({
-        order_id: data.id,
+      const payload = draftItems.map(item => ({
         item_type: item.item_type,
         description: item.description?.trim() || null,
         quantity: item.quantity,
         unit_price: item.unit_price,
-        card_id: item.card_id || null,
-      })))
-      if (itemsError) throw new Error('El pedido fue creado, pero no se pudieron registrar sus items. Revisa el pedido antes de continuar.')
-      navigate(`/admin/pedidos/${data.id}`, { replace: true })
+        card_id: supportsCard(item.item_type) ? (item.card_id || null) : null,
+      }))
+      const { data, error: orderError } = await supabase.rpc('oxxen_connect_create_order_with_items', {
+        p_customer_id: customerId,
+        p_items: payload,
+        p_discount: discount,
+        p_notes: notes.trim() || null,
+        p_currency: 'PEN',
+      })
+      if (orderError || !data) throw new Error('No se pudo crear el pedido completo. No se guardó ningún pedido parcial.')
+      navigate(`/admin/pedidos/${String(data)}`, { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo crear el pedido.')
     } finally { setSaving(false) }
@@ -110,7 +120,7 @@ export function OrderEditor() {
       discount,
       notes: notes.trim() || null,
     }).eq('id', order.id)
-    if (updateError) setError('No se pudo actualizar el pedido.')
+    if (updateError) setError('No se pudo actualizar el pedido. Revisa relaciones de tarjetas y permisos.')
     else { setSaved(true); await load(); setTimeout(()=>setSaved(false), 1800) }
     setSaving(false)
   }
@@ -131,9 +141,9 @@ export function OrderEditor() {
       description: item.description?.trim() || null,
       quantity: Number(item.quantity),
       unit_price: Number(item.unit_price),
-      card_id: item.card_id || null,
+      card_id: supportsCard(item.item_type) ? (item.card_id || null) : null,
     }).eq('id', item.id)
-    if (itemError) setError('No se pudo actualizar el item.')
+    if (itemError) setError('No se pudo actualizar el item. Verifica que la tarjeta corresponda al cliente del pedido.')
     else await load()
     setSaving(false)
   }
@@ -159,13 +169,19 @@ export function OrderEditor() {
 
   if (isNew) return (
     <div className="page-stack editor-page">
-      <header className="page-header"><div><Link className="back-link" to="/admin/pedidos"><ArrowLeft size={16}/> Pedidos</Link><h1>Nuevo pedido</h1><p>El pedido es comercial. La identidad QR/NFC de las tarjetas se mantiene separada.</p></div></header>
+      <header className="page-header"><div><Link className="back-link" to="/admin/pedidos"><ArrowLeft size={16}/> Pedidos</Link><h1>Nuevo pedido</h1><p>Pedido e items se crean en una única operación transaccional.</p></div></header>
       <form onSubmit={createOrder} className="form-stack">
-        <section className="panel form-section"><h2>Cliente</h2><label className="field"><span>Cliente *</span><select value={customerId} onChange={e=>setCustomerId(e.target.value)} required><option value="">Selecciona un cliente</option>{customers.map(customer=><option key={customer.id} value={customer.id}>{customerDisplayName(customer)} · {customer.customer_code}</option>)}</select></label></section>
-        <section className="panel form-section"><div className="panel-title"><h2>Items</h2><button type="button" className="ghost-button" onClick={()=>setDraftItems(prev=>[...prev, blankItem()])}><Plus size={16}/> Agregar</button></div>{draftItems.map((item,index)=><div className="grid-3" key={index}><label className="field"><span>Tipo</span><select value={item.item_type} onChange={e=>updateDraftItem(index,{ item_type: e.target.value as OrderItemType })}><option value="nfc_card">Tarjeta NFC</option><option value="digital_card">Tarjeta digital</option><option value="service">Servicio</option><option value="other">Otro</option></select></label><label className="field"><span>Cantidad</span><input type="number" min="1" value={item.quantity} onChange={e=>updateDraftItem(index,{ quantity: Number(e.target.value) })}/></label><label className="field"><span>Precio unitario</span><input type="number" min="0" step="0.01" value={item.unit_price} onChange={e=>updateDraftItem(index,{ unit_price: Number(e.target.value) })}/></label><label className="field"><span>Descripción</span><input value={item.description || ''} onChange={e=>updateDraftItem(index,{ description: e.target.value })}/></label></div>)}</section>
+        <section className="panel form-section"><h2>Cliente</h2><label className="field"><span>Cliente *</span><select value={customerId} onChange={e=>setCustomerId(e.target.value)} required><option value="">Selecciona un cliente</option>{customers.map(customer=><option key={customer.id} value={customer.id}>{customerDisplayName(customer)} · {customer.customer_code}</option>)}</select></label>{customerId && <Link className="linkish" to={`/admin/clientes/${customerId}`}>Ver cliente</Link>}</section>
+        <section className="panel form-section"><div className="panel-title"><h2>Items</h2><button type="button" className="ghost-button" onClick={()=>setDraftItems(prev=>[...prev, blankItem()])}><Plus size={16}/> Agregar</button></div>{draftItems.map((item,index)=><div className="grid-3" key={index}>
+          <label className="field"><span>Tipo</span><select value={item.item_type} onChange={e=>updateDraftItem(index,{ item_type: e.target.value as OrderItemType, card_id: supportsCard(e.target.value as OrderItemType) ? item.card_id : null })}><option value="nfc_card">Tarjeta NFC</option><option value="digital_card">Tarjeta digital</option><option value="service">Servicio</option><option value="other">Otro</option></select></label>
+          <label className="field"><span>Cantidad</span><input type="number" min="1" value={item.quantity} onChange={e=>updateDraftItem(index,{ quantity: Number(e.target.value) })}/></label>
+          <label className="field"><span>Precio unitario</span><input type="number" min="0" step="0.01" value={item.unit_price} onChange={e=>updateDraftItem(index,{ unit_price: Number(e.target.value) })}/></label>
+          <label className="field"><span>Descripción</span><input value={item.description || ''} onChange={e=>updateDraftItem(index,{ description: e.target.value })}/></label>
+          {supportsCard(item.item_type) && <label className="field"><span>Tarjeta digital</span><select value={item.card_id || ''} onChange={e=>updateDraftItem(index,{ card_id: e.target.value || null })}><option value="">Asignar después</option>{cardOptions.map(card=><option key={card.id} value={card.id}>{cardLabel(card)}</option>)}</select><small>Se priorizan tarjetas del cliente y legacy sin asignar.</small></label>}
+        </div>)}</section>
         <section className="panel form-section"><h2>Resumen</h2><div className="grid-3"><label className="field"><span>Descuento</span><input type="number" min="0" step="0.01" value={discount} onChange={e=>setDiscount(Number(e.target.value))}/></label><div><strong>Subtotal</strong><p>{money(draftTotals.subtotal)}</p></div><div><strong>Total</strong><p>{money(draftTotals.total)}</p></div></div><label className="field"><span>Notas</span><textarea rows={3} value={notes} onChange={e=>setNotes(e.target.value)}/></label></section>
         {error && <div className="error-box">{error}</div>}
-        <button className="primary-button save-button" disabled={saving}><Save size={18}/>{saving ? 'Guardando...' : 'Crear pedido'}</button>
+        <button className="primary-button save-button" disabled={saving}><Save size={18}/>{saving ? 'Creando pedido completo...' : 'Crear pedido'}</button>
       </form>
     </div>
   )
@@ -175,13 +191,21 @@ export function OrderEditor() {
   const transitions = nextOrderStatuses(order.status)
   return (
     <div className="page-stack">
-      <header className="page-header"><div><Link className="back-link" to="/admin/pedidos"><ArrowLeft size={16}/> Pedidos</Link><h1>{order.order_code}</h1><p>{order.customer ? customerDisplayName(order.customer) : 'Cliente'} · creado {new Date(order.created_at).toLocaleDateString('es-PE')}</p></div><div className="button-row">{transitions.map(next=><button key={next} className={next === 'cancelled' ? 'ghost-button' : 'primary-button'} disabled={saving} onClick={()=>void changeStatus(next)}>{ORDER_STATUS_LABELS[next]}</button>)}</div></header>
+      <header className="page-header"><div><Link className="back-link" to="/admin/pedidos"><ArrowLeft size={16}/> Pedidos</Link><h1>{order.order_code}</h1><p>{order.customer ? <Link className="linkish" to={`/admin/clientes/${order.customer.id}`}>{customerDisplayName(order.customer)}</Link> : 'Cliente'} · creado {new Date(order.created_at).toLocaleDateString('es-PE')}</p></div><div className="button-row">{transitions.map(next=><button key={next} className={next === 'cancelled' ? 'ghost-button' : 'primary-button'} disabled={saving} onClick={()=>void changeStatus(next)}>{ORDER_STATUS_LABELS[next]}</button>)}</div></header>
 
       <section className="panel form-section"><h2>Pedido</h2><div className="grid-3"><label className="field"><span>Cliente</span><select value={customerId} onChange={e=>setCustomerId(e.target.value)}>{customers.map(customer=><option key={customer.id} value={customer.id}>{customerDisplayName(customer)} · {customer.customer_code}</option>)}</select></label><label className="field"><span>Estado</span><input value={ORDER_STATUS_LABELS[order.status]} disabled /></label><label className="field"><span>Pago</span><select value={paymentStatus} onChange={e=>setPaymentStatus(e.target.value as PaymentStatus)}>{Object.entries(PAYMENT_STATUS_LABELS).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label><label className="field"><span>Descuento</span><input type="number" min="0" step="0.01" value={discount} onChange={e=>setDiscount(Number(e.target.value))}/></label><div><strong>Subtotal</strong><p>{money(order.subtotal, order.currency)}</p></div><div><strong>Total</strong><p>{money(order.total, order.currency)}</p></div></div><label className="field"><span>Notas</span><textarea rows={3} value={notes} onChange={e=>setNotes(e.target.value)}/></label><button className="primary-button" disabled={saving} onClick={()=>void saveOrder()}><Save size={16}/>{saved ? <><Check size={16}/> Guardado</> : 'Guardar cambios'}</button></section>
 
-      <section className="panel form-section"><div className="panel-title"><h2>Items</h2>{order.status === 'draft' && <button className="ghost-button" disabled={saving} onClick={()=>void addItem()}><Plus size={16}/> Agregar item</button>}</div>{items.length === 0 ? <p>Este pedido todavía no tiene items.</p> : items.map((item,index)=><div className="grid-3" key={item.id}><label className="field"><span>Tipo</span><select disabled={order.status !== 'draft'} value={item.item_type} onChange={e=>setItems(prev=>prev.map((row,idx)=>idx===index?{...row,item_type:e.target.value as OrderItemType}:row))}><option value="nfc_card">Tarjeta NFC</option><option value="digital_card">Tarjeta digital</option><option value="service">Servicio</option><option value="other">Otro</option></select></label><label className="field"><span>Cantidad</span><input disabled={order.status !== 'draft'} type="number" min="1" value={item.quantity} onChange={e=>setItems(prev=>prev.map((row,idx)=>idx===index?{...row,quantity:Number(e.target.value)}:row))}/></label><label className="field"><span>Precio</span><input disabled={order.status !== 'draft'} type="number" min="0" step="0.01" value={item.unit_price} onChange={e=>setItems(prev=>prev.map((row,idx)=>idx===index?{...row,unit_price:Number(e.target.value)}:row))}/></label><label className="field"><span>Descripción</span><input disabled={order.status !== 'draft'} value={item.description || ''} onChange={e=>setItems(prev=>prev.map((row,idx)=>idx===index?{...row,description:e.target.value}:row))}/></label><div><strong>Subtotal</strong><p>{money(item.subtotal, order.currency)}</p></div>{order.status === 'draft' && <button className="ghost-button" disabled={saving} onClick={()=>void saveExistingItem(item)}>Guardar item</button>}</div>)}</section>
+      <section className="panel form-section"><div className="panel-title"><h2>Items</h2>{order.status === 'draft' && <button className="ghost-button" disabled={saving} onClick={()=>void addItem()}><Plus size={16}/> Agregar item</button>}</div>{items.length === 0 ? <p>Este pedido todavía no tiene items.</p> : items.map((item,index)=><div className="grid-3" key={item.id}>
+        <label className="field"><span>Tipo</span><select disabled={order.status !== 'draft'} value={item.item_type} onChange={e=>setItems(prev=>prev.map((row,idx)=>idx===index?{...row,item_type:e.target.value as OrderItemType,card_id:supportsCard(e.target.value as OrderItemType)?row.card_id:null}:row))}><option value="nfc_card">Tarjeta NFC</option><option value="digital_card">Tarjeta digital</option><option value="service">Servicio</option><option value="other">Otro</option></select></label>
+        <label className="field"><span>Cantidad</span><input disabled={order.status !== 'draft'} type="number" min="1" value={item.quantity} onChange={e=>setItems(prev=>prev.map((row,idx)=>idx===index?{...row,quantity:Number(e.target.value)}:row))}/></label>
+        <label className="field"><span>Precio</span><input disabled={order.status !== 'draft'} type="number" min="0" step="0.01" value={item.unit_price} onChange={e=>setItems(prev=>prev.map((row,idx)=>idx===index?{...row,unit_price:Number(e.target.value)}:row))}/></label>
+        <label className="field"><span>Descripción</span><input disabled={order.status !== 'draft'} value={item.description || ''} onChange={e=>setItems(prev=>prev.map((row,idx)=>idx===index?{...row,description:e.target.value}:row))}/></label>
+        {supportsCard(item.item_type) && <label className="field"><span>Tarjeta digital</span><select disabled={order.status !== 'draft'} value={item.card_id || ''} onChange={e=>setItems(prev=>prev.map((row,idx)=>idx===index?{...row,card_id:e.target.value||null}:row))}><option value="">Sin asignar</option>{cardOptions.map(card=><option key={card.id} value={card.id}>{cardLabel(card)}</option>)}</select>{item.card_id && <Link className="linkish" to={`/admin/tarjetas/${item.card_id}`}>Abrir tarjeta</Link>}</label>}
+        <div><strong>Subtotal</strong><p>{money(item.subtotal, order.currency)}</p></div>
+        {order.status === 'draft' && <button className="ghost-button" disabled={saving} onClick={()=>void saveExistingItem(item)}>Guardar item</button>}
+      </div>)}</section>
 
-      <NfcAssetSummary orderId={order.id} title="NFC asignados" />
+      <NfcAssetSummary orderId={order.id} title="NFC del pedido" />
       {error && <div className="error-box">{error}</div>}
     </div>
   )

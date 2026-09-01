@@ -1,5 +1,6 @@
 -- OXXEN Connect — Sprint 3.3: NFC physical inventory lifecycle
--- Additive migration. It does not alter public_id, public profile resolution, aliases, QR/NFC legacy redirects or existing cards.
+-- Additive migration. It does not alter public_id, public profile resolution, aliases,
+-- QR/NFC legacy redirects or existing cards.
 
 create table if not exists public.oxxen_connect_nfc_assets (
   id uuid primary key default gen_random_uuid(),
@@ -30,16 +31,23 @@ create table if not exists public.oxxen_connect_nfc_assets (
   constraint oxxen_connect_nfc_assets_uid_format check (uid is null or uid ~ '^[0-9A-F]{8,32}$')
 );
 
+-- UNIQUE(asset_code) and UNIQUE(asset_number) already create backing indexes.
 create unique index if not exists uq_oxxen_connect_nfc_assets_uid
   on public.oxxen_connect_nfc_assets(uid) where uid is not null;
-create unique index if not exists uq_oxxen_connect_nfc_assets_card_id
+create index if not exists idx_oxxen_connect_nfc_assets_status
+  on public.oxxen_connect_nfc_assets(status);
+create index if not exists idx_oxxen_connect_nfc_assets_chip_type
+  on public.oxxen_connect_nfc_assets(chip_type);
+create index if not exists idx_oxxen_connect_nfc_assets_order_id
+  on public.oxxen_connect_nfc_assets(order_id) where order_id is not null;
+create index if not exists idx_oxxen_connect_nfc_assets_order_item_id
+  on public.oxxen_connect_nfc_assets(order_item_id) where order_item_id is not null;
+create index if not exists idx_oxxen_connect_nfc_assets_card_id
   on public.oxxen_connect_nfc_assets(card_id) where card_id is not null;
-create index if not exists idx_oxxen_connect_nfc_assets_status on public.oxxen_connect_nfc_assets(status);
-create index if not exists idx_oxxen_connect_nfc_assets_chip_type on public.oxxen_connect_nfc_assets(chip_type);
-create index if not exists idx_oxxen_connect_nfc_assets_order_id on public.oxxen_connect_nfc_assets(order_id) where order_id is not null;
-create index if not exists idx_oxxen_connect_nfc_assets_order_item_id on public.oxxen_connect_nfc_assets(order_item_id) where order_item_id is not null;
-create index if not exists idx_oxxen_connect_nfc_assets_batch_code on public.oxxen_connect_nfc_assets(batch_code) where batch_code is not null;
-create index if not exists idx_oxxen_connect_nfc_assets_created_at on public.oxxen_connect_nfc_assets(created_at desc);
+create index if not exists idx_oxxen_connect_nfc_assets_batch_code
+  on public.oxxen_connect_nfc_assets(batch_code) where batch_code is not null;
+create index if not exists idx_oxxen_connect_nfc_assets_created_at
+  on public.oxxen_connect_nfc_assets(created_at desc);
 
 create or replace function public.oxxen_connect_prepare_nfc_asset()
 returns trigger
@@ -49,9 +57,22 @@ set search_path = ''
 as $$
 declare
   v_item_order uuid;
+  v_raw_uid text;
 begin
   new.asset_code := 'NFC-' || lpad(new.asset_number::text, 6, '0');
-  new.uid := nullif(upper(regexp_replace(coalesce(new.uid, ''), '[^0-9a-fA-F]', '', 'g')), '');
+
+  -- UID is optional at every lifecycle stage. When provided, accept only
+  -- hexadecimal values plus common human-readable separators.
+  v_raw_uid := trim(coalesce(new.uid, ''));
+  if v_raw_uid = '' then
+    new.uid := null;
+  else
+    new.uid := upper(regexp_replace(v_raw_uid, '[[:space:]:-]', '', 'g'));
+    if new.uid !~ '^[0-9A-F]{8,32}$' then
+      raise exception 'UID NFC inválido' using errcode = '23514';
+    end if;
+  end if;
+
   new.batch_code := nullif(upper(trim(coalesce(new.batch_code, ''))), '');
   new.supplier := nullif(trim(coalesce(new.supplier, '')), '');
   new.notes := nullif(trim(coalesce(new.notes, '')), '');
@@ -60,6 +81,7 @@ begin
     select i.order_id into v_item_order
     from public.oxxen_connect_order_items i
     where i.id = new.order_item_id;
+
     if v_item_order is null then
       raise exception 'order_item_id no existe' using errcode = '23503';
     end if;
@@ -70,18 +92,20 @@ begin
     end if;
   end if;
 
+  if new.status = 'available' and (new.order_id is not null or new.order_item_id is not null or new.card_id is not null) then
+    raise exception 'Un NFC disponible no debe conservar asignaciones' using errcode = '23514';
+  end if;
   if new.status = 'reserved' and new.order_id is null then
     raise exception 'Un NFC reservado debe estar asociado a un pedido' using errcode = '23514';
-  end if;
-  if new.status in ('programmed','assigned','delivered') and new.uid is null then
-    raise exception 'Un NFC programado/asignado/entregado requiere UID' using errcode = '23514';
   end if;
   if new.status in ('assigned','delivered') and new.card_id is null then
     raise exception 'Un NFC asignado/entregado requiere card_id' using errcode = '23514';
   end if;
 
   if tg_op = 'INSERT' then
-    if auth.uid() is not null then new.created_by := auth.uid(); end if;
+    if auth.uid() is not null then
+      new.created_by := auth.uid();
+    end if;
   elsif old.status is distinct from new.status then
     if not (
       (old.status = 'available' and new.status in ('reserved','defective','lost','retired')) or
@@ -95,14 +119,24 @@ begin
     end if;
   end if;
 
-  if new.status = 'reserved' then new.reserved_at := coalesce(new.reserved_at, now()); end if;
-  if new.status = 'available' then new.reserved_at := null; end if;
-  if new.status = 'programmed' then new.programmed_at := coalesce(new.programmed_at, now()); end if;
-  if new.status = 'delivered' then new.delivered_at := coalesce(new.delivered_at, now()); end if;
+  if new.status = 'available' then
+    new.reserved_at := null;
+  elsif new.status = 'reserved' then
+    new.reserved_at := coalesce(new.reserved_at, now());
+  end if;
+  if new.status = 'programmed' then
+    new.programmed_at := coalesce(new.programmed_at, now());
+  end if;
+  if new.status = 'delivered' then
+    new.delivered_at := coalesce(new.delivered_at, now());
+  end if;
+
   new.updated_at := now();
   return new;
 end;
 $$;
+
+revoke all on function public.oxxen_connect_prepare_nfc_asset() from public, anon, authenticated;
 
 drop trigger if exists trg_oxxen_connect_prepare_nfc_asset on public.oxxen_connect_nfc_assets;
 create trigger trg_oxxen_connect_prepare_nfc_asset
@@ -118,7 +152,10 @@ as $$
 declare
   current_max bigint;
 begin
-  select coalesce(max(a.asset_number), 0) into current_max from public.oxxen_connect_nfc_assets a;
+  select coalesce(max(a.asset_number), 0)
+    into current_max
+  from public.oxxen_connect_nfc_assets a;
+
   if current_max = 0 then
     perform setval('public.oxxen_connect_nfc_assets_asset_number_seq'::regclass, 1, false);
   else
@@ -126,10 +163,12 @@ begin
   end if;
 end;
 $$;
+
 revoke all on function public.oxxen_connect_sync_nfc_asset_sequence() from public, anon, authenticated;
 grant execute on function public.oxxen_connect_sync_nfc_asset_sequence() to service_role;
 
 alter table public.oxxen_connect_nfc_assets enable row level security;
+
 revoke all on table public.oxxen_connect_nfc_assets from public, anon, authenticated;
 revoke all on sequence public.oxxen_connect_nfc_assets_asset_number_seq from public, anon, authenticated;
 
@@ -144,7 +183,8 @@ create policy oxxen_nfc_assets_admin_read
 on public.oxxen_connect_nfc_assets for select to authenticated
 using (
   exists (
-    select 1 from public.oxxen_connect_admins a
+    select 1
+    from public.oxxen_connect_admins a
     where a.user_id = (select auth.uid())
       and a.role in ('OWNER','ADMIN','EDITOR','SUPPORT','SALES')
   )
@@ -154,7 +194,8 @@ create policy oxxen_nfc_assets_admin_insert
 on public.oxxen_connect_nfc_assets for insert to authenticated
 with check (
   exists (
-    select 1 from public.oxxen_connect_admins a
+    select 1
+    from public.oxxen_connect_admins a
     where a.user_id = (select auth.uid())
       and a.role in ('OWNER','ADMIN')
   )
@@ -164,14 +205,16 @@ create policy oxxen_nfc_assets_admin_update
 on public.oxxen_connect_nfc_assets for update to authenticated
 using (
   exists (
-    select 1 from public.oxxen_connect_admins a
+    select 1
+    from public.oxxen_connect_admins a
     where a.user_id = (select auth.uid())
       and a.role in ('OWNER','ADMIN')
   )
 )
 with check (
   exists (
-    select 1 from public.oxxen_connect_admins a
+    select 1
+    from public.oxxen_connect_admins a
     where a.user_id = (select auth.uid())
       and a.role in ('OWNER','ADMIN')
   )
@@ -206,7 +249,8 @@ declare
   v_row public.oxxen_connect_nfc_assets%rowtype;
   i integer;
 begin
-  select a.role into v_role
+  select a.role
+    into v_role
   from public.oxxen_connect_admins a
   where a.user_id = auth.uid();
 
@@ -221,22 +265,116 @@ begin
   end if;
 
   for i in 1..p_quantity loop
-    insert into public.oxxen_connect_nfc_assets(chip_type,batch_code,supplier,purchase_cost,notes,created_by)
-    values (p_chip_type,p_batch_code,p_supplier,p_purchase_cost,p_notes,auth.uid())
+    insert into public.oxxen_connect_nfc_assets(
+      chip_type,batch_code,supplier,purchase_cost,notes,created_by
+    )
+    values (
+      p_chip_type,p_batch_code,p_supplier,p_purchase_cost,p_notes,auth.uid()
+    )
     returning * into v_row;
     return next v_row;
   end loop;
 
-  insert into public.oxxen_connect_audit_logs(admin_id, action, entity_type, old_value, new_value, metadata)
+  insert into public.oxxen_connect_audit_logs(
+    admin_id, action, entity_type, old_value, new_value, metadata
+  )
   values (
     auth.uid(), 'nfc.bulk_created', 'nfc_asset', null, null,
-    jsonb_build_object('quantity', p_quantity, 'chip_type', p_chip_type, 'batch_code', p_batch_code)
+    jsonb_build_object(
+      'quantity', p_quantity,
+      'chip_type', p_chip_type,
+      'batch_code', p_batch_code
+    )
   );
+
   return;
 end;
 $$;
-revoke all on function public.oxxen_connect_bulk_create_nfc_assets(text,integer,text,text,numeric,text) from public, anon;
+
+revoke all on function public.oxxen_connect_bulk_create_nfc_assets(text,integer,text,text,numeric,text) from public, anon, authenticated;
 grant execute on function public.oxxen_connect_bulk_create_nfc_assets(text,integer,text,text,numeric,text) to authenticated;
+
+create or replace function public.oxxen_connect_reserve_nfc_assets(
+  p_order_id uuid,
+  p_quantity integer,
+  p_order_item_id uuid default null
+)
+returns setof public.oxxen_connect_nfc_assets
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_role text;
+  v_order_exists boolean;
+  v_item_order uuid;
+  v_ids uuid[];
+  v_selected integer;
+begin
+  select a.role
+    into v_role
+  from public.oxxen_connect_admins a
+  where a.user_id = auth.uid();
+
+  if v_role not in ('OWNER','ADMIN') then
+    raise exception 'Permiso insuficiente para reservar inventario NFC' using errcode = '42501';
+  end if;
+  if v_role = 'OWNER' and coalesce(auth.jwt()->>'aal','aal1') <> 'aal2' then
+    raise exception 'OWNER requiere AAL2' using errcode = '42501';
+  end if;
+  if p_quantity is null or p_quantity < 1 or p_quantity > 500 then
+    raise exception 'La cantidad debe estar entre 1 y 500' using errcode = '22023';
+  end if;
+
+  select exists(
+    select 1 from public.oxxen_connect_orders o where o.id = p_order_id
+  ) into v_order_exists;
+  if not v_order_exists then
+    raise exception 'Pedido no encontrado' using errcode = '23503';
+  end if;
+
+  if p_order_item_id is not null then
+    select i.order_id
+      into v_item_order
+    from public.oxxen_connect_order_items i
+    where i.id = p_order_item_id;
+
+    if v_item_order is null or v_item_order <> p_order_id then
+      raise exception 'El order item no pertenece al pedido' using errcode = '23514';
+    end if;
+  end if;
+
+  -- Lock exactly the rows that will be reserved. Under concurrency we either
+  -- reserve the requested quantity or fail atomically; never return a partial reservation.
+  select array_agg(selected.id)
+    into v_ids
+  from (
+    select a.id
+    from public.oxxen_connect_nfc_assets a
+    where a.status = 'available'
+    order by a.created_at, a.asset_number
+    for update skip locked
+    limit p_quantity
+  ) selected;
+
+  v_selected := coalesce(array_length(v_ids, 1), 0);
+  if v_selected <> p_quantity then
+    raise exception 'Inventario NFC disponible insuficiente o temporalmente bloqueado: % seleccionado(s), % solicitado(s)', v_selected, p_quantity
+      using errcode = 'P0001';
+  end if;
+
+  return query
+  update public.oxxen_connect_nfc_assets a
+     set order_id = p_order_id,
+         order_item_id = p_order_item_id,
+         status = 'reserved'
+   where a.id = any(v_ids)
+  returning a.*;
+end;
+$$;
+
+revoke all on function public.oxxen_connect_reserve_nfc_assets(uuid,integer,uuid) from public, anon, authenticated;
+grant execute on function public.oxxen_connect_reserve_nfc_assets(uuid,integer,uuid) to authenticated;
 
 create or replace function public.oxxen_connect_audit_nfc_asset_change()
 returns trigger
@@ -259,23 +397,46 @@ begin
       when 'defective' then 'nfc.defective'
       when 'lost' then 'nfc.lost'
       when 'retired' then 'nfc.retired'
-      else 'nfc.updated' end;
+      else 'nfc.updated'
+    end;
   elsif old.uid is distinct from new.uid then
     v_action := 'nfc.uid_registered';
   elsif old.card_id is distinct from new.card_id then
     v_action := 'nfc.card_assigned';
   end if;
 
-  insert into public.oxxen_connect_audit_logs(admin_id, card_id, action, entity_type, entity_id, old_value, new_value, metadata)
+  insert into public.oxxen_connect_audit_logs(
+    admin_id, card_id, action, entity_type, entity_id, old_value, new_value, metadata
+  )
   values (
-    auth.uid(), new.card_id, v_action, 'nfc_asset', new.id,
-    case when tg_op = 'INSERT' then null else jsonb_build_object('status',old.status,'uid',old.uid,'order_id',old.order_id,'card_id',old.card_id) end,
-    jsonb_build_object('status',new.status,'uid',new.uid,'order_id',new.order_id,'card_id',new.card_id),
-    jsonb_build_object('asset_code',new.asset_code,'chip_type',new.chip_type,'batch_code',new.batch_code)
+    auth.uid(),
+    new.card_id,
+    v_action,
+    'nfc_asset',
+    new.id,
+    case when tg_op = 'INSERT' then null else jsonb_build_object(
+      'status',old.status,
+      'uid',old.uid,
+      'order_id',old.order_id,
+      'card_id',old.card_id
+    ) end,
+    jsonb_build_object(
+      'status',new.status,
+      'uid',new.uid,
+      'order_id',new.order_id,
+      'card_id',new.card_id
+    ),
+    jsonb_build_object(
+      'asset_code',new.asset_code,
+      'chip_type',new.chip_type,
+      'batch_code',new.batch_code
+    )
   );
+
   return new;
 end;
 $$;
+
 revoke all on function public.oxxen_connect_audit_nfc_asset_change() from public, anon, authenticated;
 
 drop trigger if exists trg_oxxen_connect_audit_nfc_asset_change on public.oxxen_connect_nfc_assets;
@@ -283,5 +444,7 @@ create trigger trg_oxxen_connect_audit_nfc_asset_change
 after insert or update on public.oxxen_connect_nfc_assets
 for each row execute function public.oxxen_connect_audit_nfc_asset_change();
 
-comment on table public.oxxen_connect_nfc_assets is 'Physical NFC inventory. public_id remains the permanent digital identity on oxxen_connect_cards.';
-comment on column public.oxxen_connect_nfc_assets.uid is 'Normalized physical chip UID; never used as public card identity.';
+comment on table public.oxxen_connect_nfc_assets is
+  'Physical NFC inventory. public_id remains the permanent digital identity on oxxen_connect_cards.';
+comment on column public.oxxen_connect_nfc_assets.uid is
+  'Optional normalized physical chip UID; never used as public card identity.';

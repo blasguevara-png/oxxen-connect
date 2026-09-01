@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { NFC_CHIP_LABELS, NFC_STATUS_LABELS, validateBulkNfcQuantity } from '../lib/nfc'
 import { supabase } from '../lib/supabase'
@@ -11,14 +11,14 @@ type Props = {
   allowReserve?: boolean
 }
 
-export function NfcAssetSummary({ orderId, cardId, title = 'NFC físicos', allowReserve = false }: Props) {
+export function NfcAssetSummary({ orderId, cardId, title = 'NFC físicos', allowReserve = true }: Props) {
   const [assets, setAssets] = useState<NfcAssetRecord[]>([])
   const [available, setAvailable] = useState(true)
   const [reserveQuantity, setReserveQuantity] = useState(1)
   const [reserving, setReserving] = useState(false)
   const [error, setError] = useState('')
 
-  const load = async () => {
+  const load = useCallback(async () => {
     let query = supabase.from('oxxen_connect_nfc_assets').select('*').order('created_at', { ascending: true })
     if (orderId) query = query.eq('order_id', orderId)
     if (cardId) query = query.eq('card_id', cardId)
@@ -30,11 +30,11 @@ export function NfcAssetSummary({ orderId, cardId, title = 'NFC físicos', allow
       setAvailable(true)
       setAssets((data || []) as NfcAssetRecord[])
     }
-  }
+  }, [orderId, cardId])
 
   useEffect(() => {
     if (orderId || cardId) void load()
-  }, [orderId, cardId])
+  }, [orderId, cardId, load])
 
   const reserve = async () => {
     if (!orderId) return

@@ -20,28 +20,43 @@ export function NfcAssetSummary({ orderId, cardId, title = 'NFC físicos', allow
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
-    let query = supabase.from('oxxen_connect_nfc_assets').select('*, card:oxxen_connect_cards(id,public_id,full_name,slug), order_item:oxxen_connect_order_items(id,description,item_type)').order('created_at', { ascending: true })
+    let query = supabase
+      .from('oxxen_connect_nfc_assets')
+      .select('*, card:oxxen_connect_cards(id,public_id,full_name,slug), order_item:oxxen_connect_order_items(id,description,item_type)')
+      .order('created_at', { ascending: true })
     if (orderId) query = query.eq('order_id', orderId)
     if (cardId) query = query.eq('card_id', cardId)
-    const [assetRes, itemRes] = await Promise.all([
-      query,
-      orderId ? supabase.from('oxxen_connect_order_items').select('quantity').eq('order_id', orderId).eq('item_type', 'nfc_card') : Promise.resolve({ data: [], error: null }),
-    ])
+
+    const assetRes = await query
     if (assetRes.error) {
-      setAvailable(false); setAssets([])
+      setAvailable(false)
+      setAssets([])
     } else {
-      setAvailable(true); setAssets((assetRes.data || []) as unknown as AssetRow[])
+      setAvailable(true)
+      setAssets((assetRes.data || []) as unknown as AssetRow[])
     }
-    if (!itemRes.error) setRequested((itemRes.data || []).reduce((sum, item) => sum + Number(item.quantity || 0), 0))
+
+    if (orderId) {
+      const itemRes = await supabase
+        .from('oxxen_connect_order_items')
+        .select('quantity')
+        .eq('order_id', orderId)
+        .eq('item_type', 'nfc_card')
+      if (!itemRes.error) {
+        setRequested((itemRes.data || []).reduce((sum, item) => sum + Number(item.quantity || 0), 0))
+      }
+    } else {
+      setRequested(0)
+    }
   }, [orderId, cardId])
 
   useEffect(() => { if (orderId || cardId) void load() }, [orderId, cardId, load])
 
   const counts = useMemo(() => ({
-    reserved: assets.filter(asset=>asset.status === 'reserved').length,
-    programmed: assets.filter(asset=>asset.status === 'programmed').length,
-    assigned: assets.filter(asset=>asset.status === 'assigned').length,
-    delivered: assets.filter(asset=>asset.status === 'delivered').length,
+    reserved: assets.filter(asset => asset.status === 'reserved').length,
+    programmed: assets.filter(asset => asset.status === 'programmed').length,
+    assigned: assets.filter(asset => asset.status === 'assigned').length,
+    delivered: assets.filter(asset => asset.status === 'delivered').length,
   }), [assets])
 
   const reserve = async () => {
@@ -49,7 +64,11 @@ export function NfcAssetSummary({ orderId, cardId, title = 'NFC físicos', allow
     setReserving(true); setError('')
     try {
       validateBulkNfcQuantity(reserveQuantity)
-      const { error: reserveError } = await supabase.rpc('oxxen_connect_reserve_nfc_assets', { p_order_id: orderId, p_quantity: reserveQuantity, p_order_item_id: null })
+      const { error: reserveError } = await supabase.rpc('oxxen_connect_reserve_nfc_assets', {
+        p_order_id: orderId,
+        p_quantity: reserveQuantity,
+        p_order_item_id: null,
+      })
       if (reserveError) throw new Error('No se pudo reservar inventario. Verifica disponibilidad, permisos y MFA.')
       await load()
     } catch (err) {

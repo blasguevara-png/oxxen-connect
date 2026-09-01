@@ -200,7 +200,7 @@ begin
   from public.oxxen_connect_admins a
   where a.user_id = auth.uid();
 
-  if v_role not in ('OWNER', 'ADMIN', 'SALES') then
+  if v_role is null or v_role not in ('OWNER', 'ADMIN', 'SALES') then
     raise exception 'Permiso insuficiente para crear pedidos' using errcode = '42501';
   end if;
 
@@ -331,7 +331,7 @@ begin
   from public.oxxen_connect_admins a
   where a.user_id = auth.uid();
 
-  if v_role not in ('OWNER', 'ADMIN', 'EDITOR', 'SUPPORT', 'SALES') then
+  if v_role is null or v_role not in ('OWNER', 'ADMIN', 'EDITOR', 'SUPPORT', 'SALES') then
     raise exception 'Acceso administrativo requerido' using errcode = '42501';
   end if;
   if v_role = 'OWNER' and coalesce(auth.jwt()->>'aal', 'aal1') <> 'aal2' then

@@ -6,11 +6,14 @@ import { Login } from './pages/Login'
 import { Dashboard } from './pages/Dashboard'
 import { Cards } from './pages/Cards'
 import { CardEditor } from './pages/CardEditor'
+import { Customers } from './pages/Customers'
+import { CustomerEditor } from './pages/CustomerEditor'
+import { CustomerDetail } from './pages/CustomerDetail'
+import { CustomerRouteResolver } from './pages/CustomerRouteResolver'
 import { PublicCard } from './pages/PublicCard'
 import { AuditLog } from './pages/AuditLog'
 import { Orders } from './pages/Orders'
 import { OrderEditor } from './pages/OrderEditor'
-import { CustomerDetail } from './pages/CustomerDetail'
 import { NfcInventory } from './pages/NfcInventory'
 import { NfcAssetEditor } from './pages/NfcAssetEditor'
 
@@ -24,10 +27,14 @@ export default function App() {
         <Route element={<AdminGuard/>}>
           <Route path="/admin" element={<AdminLayout/>}>
             <Route index element={<Dashboard/>}/>
-            <Route path="clientes" element={<Cards/>}/>
-            <Route path="clientes/nuevo" element={<CardEditor/>}/>
+            <Route path="clientes" element={<Customers/>}/>
+            <Route path="clientes/nuevo" element={<CustomerEditor/>}/>
+            <Route path="clientes/:id" element={<CustomerRouteResolver/>}/>
+            <Route path="clientes/:id/editar" element={<CustomerEditor/>}/>
             <Route path="clientes/:customerId/resumen" element={<CustomerDetail/>}/>
-            <Route path="clientes/:id" element={<CardEditor/>}/>
+            <Route path="tarjetas" element={<Cards/>}/>
+            <Route path="tarjetas/nueva" element={<CardEditor/>}/>
+            <Route path="tarjetas/:id" element={<CardEditor/>}/>
             <Route path="pedidos" element={<Orders/>}/>
             <Route path="pedidos/nuevo" element={<OrderEditor/>}/>
             <Route path="pedidos/:id" element={<OrderEditor/>}/>

@@ -1,6 +1,6 @@
 # OXXEN Connect
 
-Plataforma propia de OXXEN GROUP para crear y administrar tarjetas de presentación inteligentes vinculadas a **NFC + QR**.
+Plataforma propia de OXXEN GROUP para administrar clientes, pedidos, tarjetas digitales e inventario físico **NFC + QR**.
 
 ## Producción
 
@@ -20,45 +20,102 @@ La URL que se imprime/graba físicamente usa un identificador permanente:
 https://connect.oxxengroup.com/p/{public_id}
 ```
 
-- `public_id`: permanente e inmutable. Es el identificador físico del QR/NFC.
+- `public_id`: permanente e inmutable; identidad física/digital del QR/NFC.
 - `slug`: alias amigable editable.
-- `oxxen_connect_card_aliases`: historial permanente de slugs. Un alias histórico nunca se reutiliza para otra tarjeta.
+- `oxxen_connect_card_aliases`: historial permanente de slugs; un alias histórico nunca se reutiliza para otra tarjeta.
+- `nfc_assets.uid`: metadato físico del chip, nunca reemplaza `public_id`.
 
-Las tarjetas antiguas que contienen `https://oxxen-connect.vercel.app/p/:identifier` se conservan mediante redirección permanente **308** al dominio canónico. No eliminar el dominio histórico mientras existan tarjetas impresas con esa URL.
+Las tarjetas antiguas con `https://oxxen-connect.vercel.app/p/:identifier` conservan redirección permanente **308** al dominio canónico. No retirar el dominio histórico mientras existan tarjetas impresas con esa URL.
+
+## Modelo operativo
+
+S3.1–S3.4 separan identidad comercial, venta, activo físico e identidad pública:
+
+```text
+Customer
+  ↓
+Order
+  ↓
+Order Item
+  ↓
+NFC Asset
+  ↓
+Digital Card
+  ↓
+public_id
+  ↓
+QR / NFC físico
+```
+
+Relaciones importantes:
+
+- un Customer puede tener varias Cards y varios Orders;
+- `cards.customer_id` es nullable para preservar tarjetas legacy;
+- un Order Item puede asociarse a una Card antes o durante producción;
+- la relación Card↔Order valida que no se mezclen clientes distintos, salvo Cards legacy sin customer;
+- el UID NFC es información operativa, no una URL pública.
+
+## Módulos administrativos
+
+- `/admin/clientes`: Customers comerciales reales.
+- `/admin/pedidos`: pedidos, items, estado y pago.
+- `/admin/tarjetas`: perfiles digitales, `public_id`, QR y contenido público.
+- `/admin/inventario-nfc`: activos NFC, UID, lote, proveedor, costo y lifecycle.
+- `/admin/actividad`: audit log.
 
 ## Base de datos principal
 
 - `oxxen_connect_admins`
+- `oxxen_connect_customers`
+- `oxxen_connect_orders`
+- `oxxen_connect_order_items`
 - `oxxen_connect_cards`
 - `oxxen_connect_card_aliases`
+- `oxxen_connect_nfc_assets`
 - `oxxen_connect_analytics_events`
 - `oxxen_connect_audit_logs`
 - vista `oxxen_connect_analytics_daily`
 
-El acceso administrativo está protegido por Supabase Auth + RLS. La tabla de administradores dispone de roles `OWNER`, `ADMIN`, `EDITOR`, `SUPPORT` y `SALES`.
+## Pedidos atómicos — S3.4
 
-### MFA administrativo
+La creación de un pedido nuevo usa `oxxen_connect_create_order_with_items(...)`.
 
-`OWNER` requiere TOTP MFA antes de acceder a los datos operativos del panel. El frontend exige una sesión `aal2` y una política RLS restrictiva aplica la misma condición en PostgreSQL/Storage. `ADMIN` queda preparado para incorporarse a la lista de roles con MFA obligatorio cuando OXXEN lo decida.
+La función valida rol, OWNER/AAL2, customer, items, cantidades, precios y relaciones de Card. La ejecución de la función PostgreSQL es transaccional: si cualquier validación o INSERT falla, no debe persistir un pedido parcial.
 
-Los secretos TOTP permanecen dentro de Supabase Auth; OXXEN Connect no los almacena en tablas propias. Ver `docs/SPRINT2_CLOSEOUT.md` para enrollment, recuperación y operación.
+## Seguridad y RBAC
+
+El acceso administrativo usa Supabase Auth + RLS.
+
+Roles existentes:
+
+- `OWNER`
+- `ADMIN`
+- `EDITOR`
+- `SUPPORT`
+- `SALES`
+
+OWNER requiere TOTP MFA/AAL2 para datos operativos. Los secretos TOTP permanecen dentro de Supabase Auth.
+
+La matriz efectiva y las decisiones pendientes están documentadas en `docs/RBAC_MATRIX.md`. S3.4 no inventa permisos ambiguos para SALES/EDITOR/SUPPORT.
+
+Security Advisor decisions: `docs/SECURITY_DECISIONS_S3_4.md`.
+
+Nunca usar `service_role` en variables `VITE_*` ni exponerla al navegador.
 
 ## Analytics
 
-El perfil público registra únicamente eventos permitidos mediante `record_public_event()`; no existe INSERT anónimo directo a la tabla. La función aplica validación, deduplicación de vistas y rate limiting. El hash de visitante usa una sal privada almacenada fuera del schema público y no persiste la IP en texto plano.
-
-La pantalla Clientes usa `get_card_analytics_summary()` para agregar estadísticas en PostgreSQL en lugar de descargar todos los eventos al navegador.
+El perfil público registra eventos únicamente mediante `record_public_event()`; no existe INSERT anónimo directo a la tabla de analytics. El dashboard S3.4 agrega únicamente métricas operativas básicas y ventanas 7/30 días; no implementa analítica avanzada.
 
 ## Storage
 
-El bucket oficial es `oxxen-connect-media` del proyecto Supabase de OXXEN Connect. Los medios nuevos se validan y optimizan en navegador antes de subir:
+El bucket oficial es `oxxen-connect-media`. Los medios nuevos se validan/optimizan antes de subir:
 
-- foto: máximo aproximado 512 px;
-- logo/banner: máximo aproximado 1200 px;
+- foto: aproximadamente 512 px máximo;
+- logo/banner: aproximadamente 1200 px máximo;
 - salida WEBP;
 - bucket limitado a JPG/PNG/WEBP y 2 MB por objeto.
 
-Al reemplazar una imagen, primero se sube y vincula la nueva; solo después se elimina el objeto anterior si pertenece al Storage oficial.
+Al reemplazar una imagen se vincula primero la nueva y después se elimina el objeto anterior cuando pertenece al Storage oficial.
 
 ## Variables de entorno del frontend
 
@@ -68,67 +125,63 @@ VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_xxxxxxxxxxxxxxxxx
 VITE_PUBLIC_BASE_URL=https://connect.oxxengroup.com
 ```
 
-Nunca usar `service_role` en una variable `VITE_*` ni exponerla al navegador.
-
-## Desarrollo
+## Desarrollo y verificación
 
 ```bash
-npm install
-npm run dev
-```
-
-Comprobaciones disponibles:
-
-```bash
+npm ci
 npm run lint
 npm run typecheck
 npm run test
 npm run build
-npm run test:e2e
+npm run test:e2e:critical
 ```
 
-El CI ejecuta lint, typecheck, tests y build en PR/main. El smoke test de producción verifica el perfil público y la compatibilidad del QR histórico.
+`package-lock.json` está versionado y CI/backups usan `npm ci` para instalaciones reproducibles.
+
+CI valida lint, TypeScript, unit/contract tests, build y E2E no destructivos. El E2E autenticado mutante de Customer→Order→Card→NFC debe ejecutarse contra un Supabase staging aislado; nunca contra clientes reales de producción.
 
 ## Backups y restauración
 
-Los scripts de export/restore siguen disponibles:
+Scripts:
 
 ```bash
 SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... npm run backup:export
 npm run backup:restore -- backups/<carpeta>
 ```
 
-La restauración es dry-run por defecto y conserva `id`, `public_id` y aliases originales.
+El restore es dry-run por defecto y valida IDs/códigos, `public_id`, aliases, relaciones comerciales y UIDs NFC antes de permitir `--apply`.
 
-Además, `.github/workflows/encrypted-backup.yml` prepara backups externos automáticos cifrados:
+`.github/workflows/encrypted-backup.yml` mantiene backups externos cifrados:
 
 - diario: 7 días;
 - semanal: 28 días;
 - mensual: 90 días;
-- ejecución manual antes de migraciones.
-
-El workflow exporta, valida en dry-run, cifra con AES-256-CBC/PBKDF2 y sube únicamente el artefacto cifrado. Requiere tres GitHub Actions secrets descritos en `docs/SPRINT2_CLOSEOUT.md`; nunca colocar secretos en el repositorio.
+- manual antes de migraciones.
 
 ## Migraciones
 
-Los cambios de esquema se guardan en `supabase/migrations/`. No editar migraciones históricas ya aplicadas. Secuencia de producción:
+No editar migraciones históricas aplicadas. Secuencia de rollout:
 
-1. snapshot/backup;
-2. inspección;
-3. aplicar migración;
-4. smoke tests de login, MFA, dashboard, perfil público, QR histórico y `/api/contact`;
-5. revisar Security/Performance Advisors y logs.
+1. backup cifrado pre-migración;
+2. restore dry-run;
+3. aplicar únicamente migraciones nuevas autorizadas;
+4. validar FKs/RLS/grants;
+5. comprobar `public_id`, slugs y aliases;
+6. smoke tests públicos/administrativos;
+7. revisar Security/Performance Advisors.
 
-## API de contacto
+## Entregas
 
-`/api/contact?id={public_id}` genera una vCard desde `get_public_card()`. Valida el identificador, usa la API WHATWG `URL`, limita tiempos de espera y evita exponer errores internos.
+- **S3.1 Customers:** entidad comercial separada y `cards.customer_id` nullable.
+- **S3.2 Orders:** pedidos/items, lifecycle, totales derivados y audit log.
+- **S3.3 NFC inventory:** activos físicos, UID, reserva y lifecycle.
+- **S3.4 Operational Closure:** separación UX Customers/Cards, relaciones visibles, creación atómica de pedidos, Customer audit, dashboard operativo, documentación/RBAC y hardening de QA.
 
-## Roadmap posterior al Sprint 2
+## Roadmap posterior a S3.4
 
-- permisos granulares por rol;
-- obligatoriedad de MFA para `ADMIN` cuando exista más personal;
-- analytics comercial por rango de fechas;
-- retención/rollup físico de analytics;
-- plantillas por rubro;
-- gestión de fabricación NFC/QR y pedidos;
-- leads/CRM e integraciones comerciales.
+- Supabase staging dedicado para E2E autenticado CRUD/lifecycle.
+- decisión y aplicación final de permisos granulares SALES/EDITOR/SUPPORT.
+- MFA obligatorio para ADMIN si OXXEN incorpora más personal con ese rol.
+- retención/rollup físico de analytics cuando el volumen lo justifique.
+- plantillas de tarjeta por rubro.
+- leads/CRM e integraciones comerciales **solo después de validar el flujo operativo base**.

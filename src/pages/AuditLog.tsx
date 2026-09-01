@@ -9,7 +9,7 @@ type AuditRow = {
   entity_type: string
   created_at: string
   card_id: string | null
-  metadata: { changed_fields?: string[]; order_code?: string; order_id?: string } | null
+  metadata: { changed_fields?: string[]; order_code?: string; order_id?: string; asset_code?: string; chip_type?: string; batch_code?: string } | null
   oxxen_connect_cards: { full_name: string; slug: string } | null
 }
 
@@ -37,6 +37,18 @@ const labels: Record<string, string> = {
   'order_item.created': 'Item de pedido creado',
   'order_item.updated': 'Item de pedido actualizado',
   'order_item.card_assigned': 'Tarjeta asignada a item',
+  'nfc.created': 'Activo NFC creado',
+  'nfc.bulk_created': 'Lote NFC creado',
+  'nfc.updated': 'Activo NFC actualizado',
+  'nfc.reserved': 'NFC reservado',
+  'nfc.released': 'Reserva NFC liberada',
+  'nfc.uid_registered': 'UID NFC registrado',
+  'nfc.programmed': 'NFC marcado como programado',
+  'nfc.card_assigned': 'NFC asignado a tarjeta',
+  'nfc.delivered': 'NFC entregado',
+  'nfc.defective': 'NFC marcado defectuoso',
+  'nfc.lost': 'NFC marcado perdido',
+  'nfc.retired': 'NFC retirado',
 }
 
 export function AuditLog() {
@@ -62,13 +74,14 @@ export function AuditLog() {
   const entityLabel = (row: AuditRow) => {
     if (row.entity_type === 'order') return row.metadata?.order_code || 'Pedido'
     if (row.entity_type === 'order_item') return `Item · pedido ${row.metadata?.order_id?.slice(0, 8) || '—'}`
+    if (row.entity_type === 'nfc_asset') return row.metadata?.asset_code || 'Activo NFC'
     if (row.oxxen_connect_cards) return `${row.oxxen_connect_cards.full_name} · /p/${row.oxxen_connect_cards.slug}`
     return row.entity_type || 'Registro administrativo'
   }
 
   return (
     <div className="page-stack">
-      <header className="page-header"><div><span className="eyebrow">SEGURIDAD</span><h1>Actividad</h1><p>Historial administrativo de tarjetas, pedidos y operaciones comerciales.</p></div></header>
+      <header className="page-header"><div><span className="eyebrow">SEGURIDAD</span><h1>Actividad</h1><p>Historial administrativo de tarjetas, pedidos, inventario NFC y operaciones comerciales.</p></div></header>
       {loading ? <Loading/> : error ? <div className="empty-state"><h2>No pudimos cargar la actividad</h2><p>Intenta nuevamente en unos segundos.</p><button className="primary-button" onClick={()=>void load()}>Reintentar</button></div> : rows.length === 0 ? <div className="empty-state"><History size={26}/><h2>Sin cambios registrados todavía</h2><p>Las próximas modificaciones administrativas aparecerán aquí.</p></div> : (
         <div className="table-wrap"><table><thead><tr><th>Fecha</th><th>Acción</th><th>Entidad</th><th>Campos</th></tr></thead><tbody>
           {rows.map(row => <tr key={row.id}>

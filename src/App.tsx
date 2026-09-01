@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { AdminGuard } from './components/AdminGuard'
 import { AdminLayout } from './components/AdminLayout'
 import { Landing } from './pages/Landing'
@@ -31,7 +31,7 @@ export default function App() {
             <Route path="clientes/nuevo" element={<CustomerEditor/>}/>
             <Route path="clientes/:id" element={<CustomerDetail/>}/>
             <Route path="clientes/:id/editar" element={<CustomerEditor/>}/>
-            <Route path="clientes/:id/resumen" element={<Navigate to=".." replace/>}/>
+            <Route path="clientes/:customerId/resumen" element={<CustomerDetail/>}/>
 
             <Route path="tarjetas" element={<Cards/>}/>
             <Route path="tarjetas/nueva" element={<CardEditor/>}/>

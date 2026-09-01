@@ -59,13 +59,23 @@ const orderItemIds = new Set(orderItems.map(item => item.id))
 const assetIds = new Set(nfcAssets.map(asset => asset.id))
 const assetCodes = new Set(nfcAssets.map(asset => asset.asset_code))
 const assetNumbers = new Set(nfcAssets.map(asset => asset.asset_number))
-const uids = nfcAssets.map(asset => asset.uid).filter(Boolean)
-const cardLinks = nfcAssets.map(asset => asset.card_id).filter(Boolean)
+const validChipTypes = new Set(['NTAG213', 'NTAG215', 'NTAG216', 'NTAG424_DNA', 'OTHER'])
+const validStatuses = new Set(['available', 'reserved', 'programmed', 'assigned', 'delivered', 'defective', 'lost', 'retired'])
+
+function normalizedUid(value) {
+  if (value == null || String(value).trim() === '') return null
+  const normalized = String(value).trim().toUpperCase().replace(/[\s:-]/g, '')
+  if (!/^[0-9A-F]{8,32}$/.test(normalized)) throw new Error(`Backup inválido: UID NFC con formato inválido (${value}).`)
+  return normalized
+}
+
+const uids = nfcAssets.map(asset => normalizedUid(asset.uid)).filter(Boolean)
 if (assetIds.size !== nfcAssets.length) throw new Error('Backup inválido: NFC asset id duplicado.')
 if (assetCodes.size !== nfcAssets.length) throw new Error('Backup inválido: asset_code NFC duplicado.')
 if (assetNumbers.size !== nfcAssets.length) throw new Error('Backup inválido: asset_number NFC duplicado.')
 if (new Set(uids).size !== uids.length) throw new Error('Backup inválido: UID NFC duplicado.')
-if (new Set(cardLinks).size !== cardLinks.length) throw new Error('Backup inválido: más de un NFC asociado a la misma tarjeta.')
+if (nfcAssets.some(asset => !validChipTypes.has(asset.chip_type))) throw new Error('Backup inválido: chip_type NFC no soportado.')
+if (nfcAssets.some(asset => !validStatuses.has(asset.status))) throw new Error('Backup inválido: status NFC no soportado.')
 if (nfcAssets.some(asset => asset.order_id && !orderIds.has(asset.order_id))) throw new Error('Backup inválido: NFC vinculado a pedido ausente.')
 if (nfcAssets.some(asset => asset.order_item_id && !orderItemIds.has(asset.order_item_id))) throw new Error('Backup inválido: NFC vinculado a order item ausente.')
 if (nfcAssets.some(asset => asset.card_id && !cardIds.has(asset.card_id))) throw new Error('Backup inválido: NFC vinculado a tarjeta ausente.')

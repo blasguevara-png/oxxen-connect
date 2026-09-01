@@ -38,6 +38,16 @@ export function formatNfcAssetCode(assetNumber: number) {
   return `NFC-${String(assetNumber).padStart(6, '0')}`
 }
 
+export function validateNfcChipType(value: string): NfcChipType {
+  if (!NFC_CHIP_TYPES.includes(value as NfcChipType)) throw new Error('Tipo de chip NFC inválido.')
+  return value as NfcChipType
+}
+
+export function validateNfcStatus(value: string): NfcAssetStatus {
+  if (!NFC_ASSET_STATUSES.includes(value as NfcAssetStatus)) throw new Error('Estado NFC inválido.')
+  return value as NfcAssetStatus
+}
+
 export function normalizeNfcUid(value: string | null | undefined) {
   const raw = String(value || '').trim()
   if (!raw) return null

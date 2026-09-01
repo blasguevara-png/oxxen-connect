@@ -11,6 +11,8 @@ import { AuditLog } from './pages/AuditLog'
 import { Orders } from './pages/Orders'
 import { OrderEditor } from './pages/OrderEditor'
 import { CustomerDetail } from './pages/CustomerDetail'
+import { NfcInventory } from './pages/NfcInventory'
+import { NfcAssetEditor } from './pages/NfcAssetEditor'
 
 export default function App() {
   return (
@@ -29,6 +31,8 @@ export default function App() {
             <Route path="pedidos" element={<Orders/>}/>
             <Route path="pedidos/nuevo" element={<OrderEditor/>}/>
             <Route path="pedidos/:id" element={<OrderEditor/>}/>
+            <Route path="inventario-nfc" element={<NfcInventory/>}/>
+            <Route path="inventario-nfc/:id" element={<NfcAssetEditor/>}/>
             <Route path="actividad" element={<AuditLog/>}/>
           </Route>
         </Route>

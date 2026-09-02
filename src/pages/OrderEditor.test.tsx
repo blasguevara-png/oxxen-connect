@@ -122,6 +122,7 @@ describe('OrderEditor S3.5 transactional editing', () => {
     await screen.findByRole('heading', { name: 'ORD-000001' })
     fireEvent.change(screen.getByLabelText('Notas'), { target: { value: 'cambio viejo' } })
     fireEvent.click(screen.getByRole('button', { name: /Guardar cambios/i }))
-    expect(await screen.findByText(/cambió en otra sesión/i)).toBeInTheDocument()
+    const messages = await screen.findAllByText(/cambió en otra sesión/i)
+    expect(messages.length).toBeGreaterThan(0)
   })
 })

@@ -153,6 +153,8 @@ begin
   end;
 
   -- A signed-in identity with no admin row must fail closed.
+  -- auth.uid() reads request.jwt.claim.sub, so update both legacy sub and claims.
+  perform set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000009999', true);
   perform set_config(
     'request.jwt.claims',
     '{"sub":"00000000-0000-4000-8000-000000009999","role":"authenticated","aal":"aal2"}',

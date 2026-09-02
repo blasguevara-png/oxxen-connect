@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { OrderEditor } from './OrderEditor'
 
 const customer = {
@@ -48,6 +48,8 @@ vi.mock('../lib/supabase', () => ({
     rpc: (...args: unknown[]) => rpc(...args),
   },
 }))
+
+afterEach(() => cleanup())
 
 describe('OrderEditor S3.5 transactional editing', () => {
   beforeEach(() => {

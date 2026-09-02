@@ -11,6 +11,7 @@ Plataforma propia de OXXEN GROUP para administrar clientes, pedidos, tarjetas di
 - Base de datos: Supabase PostgreSQL
 - Auth: Supabase Auth
 - Medios: Supabase Storage (`oxxen-connect-media`)
+- Plan Supabase actual: **FREE**
 
 ## Invariante físico QR/NFC
 
@@ -29,7 +30,7 @@ Las tarjetas antiguas con `https://oxxen-connect.vercel.app/p/:identifier` conse
 
 ## Modelo operativo
 
-S3.1–S3.4 separan identidad comercial, venta, activo físico e identidad pública:
+S3.1–S3.5 separan identidad comercial, venta, activo físico e identidad pública:
 
 ```text
 Customer
@@ -76,11 +77,13 @@ Relaciones importantes:
 - `oxxen_connect_audit_logs`
 - vista `oxxen_connect_analytics_daily`
 
-## Pedidos atómicos — S3.4
+## Pedidos transaccionales — S3.4/S3.5
 
 La creación de un pedido nuevo usa `oxxen_connect_create_order_with_items(...)`.
 
-La función valida rol, OWNER/AAL2, customer, items, cantidades, precios y relaciones de Card. La ejecución de la función PostgreSQL es transaccional: si cualquier validación o INSERT falla, no debe persistir un pedido parcial.
+S3.5 agrega `oxxen_connect_update_order_with_items(...)` para editar Pedido + Items en una única operación. El navegador deja de tener escritura directa de Orders/Items; la RPC valida rol, OWNER/AAL2, Customer, items, cantidades, precios, Card/Customer, estados y concurrencia. Si una validación falla, la llamada completa revierte.
+
+Los totales siguen siendo autoridad de PostgreSQL; el frontend no persiste `subtotal`/`total` como fuente de verdad. Los Items no se hard-deletean en S3.5: omitir uno existente se rechaza.
 
 ## Seguridad y RBAC
 
@@ -96,15 +99,17 @@ Roles existentes:
 
 OWNER requiere TOTP MFA/AAL2 para datos operativos. Los secretos TOTP permanecen dentro de Supabase Auth.
 
-La matriz efectiva y las decisiones pendientes están documentadas en `docs/RBAC_MATRIX.md`. S3.4 no inventa permisos ambiguos para SALES/EDITOR/SUPPORT.
+La matriz efectiva está documentada en `docs/RBAC_MATRIX.md`. Para Orders/Items, S3.5 mantiene OWNER/ADMIN/SALES como roles de escritura y EDITOR/SUPPORT en lectura; la autorización final se valida dentro de la RPC y en la capa de base de datos.
 
 Security Advisor decisions: `docs/SECURITY_DECISIONS_S3_4.md`.
+
+`Leaked Password Protection` permanece **ACCEPTED — PLAN LIMITATION (SUPABASE FREE)** mientras el propietario decida mantener el proyecto en Free. No crear workarounds ni cambiar de plan únicamente para silenciar el warning.
 
 Nunca usar `service_role` en variables `VITE_*` ni exponerla al navegador.
 
 ## Analytics
 
-El perfil público registra eventos únicamente mediante `record_public_event()`; no existe INSERT anónimo directo a la tabla de analytics. El dashboard S3.4 agrega únicamente métricas operativas básicas y ventanas 7/30 días; no implementa analítica avanzada.
+El perfil público registra eventos únicamente mediante `record_public_event()`; no existe INSERT anónimo directo a la tabla de analytics. El dashboard agrega únicamente métricas operativas básicas y ventanas 7/30 días; no implementa analítica avanzada.
 
 ## Storage
 
@@ -176,11 +181,20 @@ No editar migraciones históricas aplicadas. Secuencia de rollout:
 - **S3.2 Orders:** pedidos/items, lifecycle, totales derivados y audit log.
 - **S3.3 NFC inventory:** activos físicos, UID, reserva y lifecycle.
 - **S3.4 Operational Closure:** separación UX Customers/Cards, relaciones visibles, creación atómica de pedidos, Customer audit, dashboard operativo, documentación/RBAC y hardening de QA.
+- **S3.5 Orders Transactional Editing:** edición atómica Order+Items, eliminación de escrituras directas del navegador, control de concurrencia, audit summary y preparación del piloto operativo controlado.
 
-## Roadmap posterior a S3.4
+## Operación y piloto S3.5
 
-- Supabase staging dedicado para E2E autenticado CRUD/lifecycle.
-- decisión y aplicación final de permisos granulares SALES/EDITOR/SUPPORT.
+- Diseño: `docs/S3_5_ORDER_TRANSACTION_DESIGN.md`
+- Runbook: `docs/RUNBOOK_S3_5.md`
+- Piloto: `docs/S3_5_REAL_OPERATION_PILOT.md`
+
+El rollout S3.5 no autoriza por sí mismo datos piloto. El piloto requiere una autorización separada: `Autorizo piloto operativo S3.5.`
+
+## Roadmap posterior
+
+- Supabase staging dedicado para E2E autenticado CRUD/lifecycle cuando el costo/plan lo justifique.
+- decisión y aplicación final de permisos granulares Cards para SALES/EDITOR/SUPPORT.
 - MFA obligatorio para ADMIN si OXXEN incorpora más personal con ese rol.
 - retención/rollup físico de analytics cuando el volumen lo justifique.
 - plantillas de tarjeta por rubro.

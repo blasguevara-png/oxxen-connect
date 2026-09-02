@@ -109,7 +109,7 @@ describe('OrderEditor S3.5 transactional editing', () => {
     await waitFor(() => expect(screen.getByLabelText('Notas')).toHaveValue('persistido'))
     expect(screen.getByLabelText('Cantidad')).toHaveValue(2)
     expect(screen.getByLabelText('Precio')).toHaveValue(15)
-    expect(screen.getByLabelText('Tarjeta digital')).toHaveValue(card.id)
+    expect(screen.getByDisplayValue(/Tarjeta S3\.5/)).toHaveValue(card.id)
   })
 
   it('shows an actionable conflict instead of silently overwriting stale work', async () => {

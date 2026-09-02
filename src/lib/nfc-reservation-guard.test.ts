@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 const read = (relativePath: string) => readFileSync(resolve(process.cwd(), relativePath), 'utf8')
 const migration = read('supabase/migrations/20260902_fix_nfc_overreservation.sql')
+const triggerGuard = read('supabase/migrations/20260902_fix_nfc_overreservation_trigger_guard.sql')
 const summary = read('src/components/NfcAssetSummary.tsx')
 
 describe('NFC over-reservation guard', () => {
@@ -42,6 +43,24 @@ describe('NFC over-reservation guard', () => {
     expect(migration).not.toMatch(/update\s+public\.oxxen_connect_cards/i)
     expect(migration).not.toMatch(/delete\s+from/i)
     expect(migration).not.toMatch(/truncate\s+/i)
+  })
+
+  it('enforces the same capacity rule on direct NFC asset edits', () => {
+    expect(triggerGuard).toContain('create or replace function public.oxxen_connect_prepare_nfc_asset()')
+    expect(triggerGuard).toContain("new.status in ('reserved','programmed','assigned','delivered')")
+    expect(triggerGuard).toContain('new.order_item_id is null')
+    expect(triggerGuard).toContain("v_item_type is distinct from 'nfc_card'")
+    expect(triggerGuard).toMatch(/where o\.id = new\.order_id\s+for update/i)
+    expect(triggerGuard).toContain('if v_existing_covered >= v_requested then')
+    expect(triggerGuard).toContain('if v_item_covered >= v_item_quantity then')
+  })
+
+  it('preserves UID normalization, lifecycle checks and timestamp behavior in the trigger', () => {
+    expect(triggerGuard).toContain("new.uid !~ '^[0-9A-F]{8,32}$'")
+    expect(triggerGuard).toContain("old.status = 'available' and new.status in ('reserved','defective','lost','retired')")
+    expect(triggerGuard).toContain('new.reserved_at := coalesce(new.reserved_at, now())')
+    expect(triggerGuard).toContain('new.programmed_at := coalesce(new.programmed_at, now())')
+    expect(triggerGuard).toContain('new.delivered_at := coalesce(new.delivered_at, now())')
   })
 
   it('disables further reservation in the UI when requested capacity is covered', () => {

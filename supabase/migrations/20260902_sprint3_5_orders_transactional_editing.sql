@@ -31,8 +31,8 @@ declare
   v_card_id uuid;
   v_card_customer uuid;
   v_existing public.oxxen_connect_order_items%rowtype;
+  v_original_ids uuid[] := '{}'::uuid[];
   v_seen_ids uuid[] := '{}'::uuid[];
-  v_existing_count integer;
   v_changed_item_count integer := 0;
   v_card_change_count integer := 0;
   v_subtotal numeric(12,2);
@@ -111,6 +111,13 @@ begin
   ) then
     raise exception 'Cliente, moneda y descuento solo pueden editarse en borrador' using errcode = '23514';
   end if;
+
+  -- Snapshot item identity before any insert. This makes omission detection
+  -- deterministic and independent of transaction timestamp semantics.
+  select coalesce(array_agg(i.id order by i.id), '{}'::uuid[])
+    into v_original_ids
+  from public.oxxen_connect_order_items i
+  where i.order_id = p_order_id;
 
   for v_item in select value from jsonb_array_elements(p_items)
   loop
@@ -213,20 +220,12 @@ begin
     end if;
   end loop;
 
-  -- No physical deletion in S3.5. Omitting an existing item is rejected.
-  select count(*) into v_existing_count
-  from public.oxxen_connect_order_items i
-  where i.order_id = p_order_id
-    and i.id <> all(coalesce(v_seen_ids, '{}'::uuid[]));
-
-  -- The previous query includes newly inserted items. They are allowed; compare
-  -- only pre-existing IDs by requiring every pre-existing row to be represented.
+  -- No physical deletion in S3.5. Every row that existed when the call started
+  -- must still be represented in the submitted state.
   if exists (
     select 1
-    from public.oxxen_connect_order_items i
-    where i.order_id = p_order_id
-      and i.created_at <= v_order.updated_at
-      and not (i.id = any(v_seen_ids))
+    from unnest(v_original_ids) as original(id)
+    where not (original.id = any(v_seen_ids))
   ) then
     raise exception 'S3.5 no permite eliminar items; conserva todos los items existentes' using errcode = '23514';
   end if;

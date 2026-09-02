@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  calculateNfcCoverage,
   canManageNfcInventory,
   canReadNfcInventory,
   canTransitionNfcStatus,
@@ -62,6 +63,30 @@ describe('NFC inventory domain', () => {
     expect(() => validateBulkNfcQuantity(0)).toThrow()
     expect(() => validateBulkNfcQuantity(501)).toThrow()
     expect(() => validateBulkNfcQuantity(1.5)).toThrow()
+  })
+
+  it('counts only fulfillment statuses toward the NFC request', () => {
+    expect(calculateNfcCoverage(3, ['reserved', 'programmed', 'assigned'])).toEqual({
+      requested: 3,
+      covered: 3,
+      pending: 0,
+      overbooked: 0,
+    })
+    expect(calculateNfcCoverage(3, ['available', 'reserved', 'defective', 'lost'])).toEqual({
+      requested: 3,
+      covered: 1,
+      pending: 2,
+      overbooked: 0,
+    })
+  })
+
+  it('detects over-reservation instead of hiding it', () => {
+    expect(calculateNfcCoverage(3, ['reserved', 'reserved', 'reserved', 'reserved'])).toEqual({
+      requested: 3,
+      covered: 4,
+      pending: 0,
+      overbooked: 1,
+    })
   })
 
   it('keeps read wider than operational management', () => {

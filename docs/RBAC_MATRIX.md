@@ -40,6 +40,20 @@ Esta propuesta NO está aplicada:
 | NFC | R/W | R/W | R | R | R |
 | Roles / seguridad | R/W | según política | — | — | — |
 
+## S3.5 — Orders/Items write authority
+
+S3.5 **no cambia la matriz de negocio** de Orders/Items. Cambia únicamente el mecanismo técnico de escritura:
+
+- OWNER: invoca RPC de create/update; AAL2 obligatorio.
+- ADMIN: invoca RPC de create/update.
+- SALES: invoca RPC de create/update.
+- EDITOR: lectura; la RPC de escritura lo rechaza.
+- SUPPORT: lectura; la RPC de escritura lo rechaza.
+- authenticated sin fila admin: rechazado.
+- anon: sin acceso a tablas operativas y sin EXECUTE de RPC administrativas.
+
+Los grants directos de INSERT/UPDATE a columnas de `oxxen_connect_orders` y `oxxen_connect_order_items` dejan de formar parte del contrato después de S3.5. RLS sigue siendo defensa en profundidad para lectura y cualquier acceso directo residual.
+
 ## Reglas permanentes
 
 1. RLS es la autoridad. Ocultar un botón no equivale a seguridad.

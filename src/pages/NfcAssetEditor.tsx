@@ -33,6 +33,8 @@ const auditLabels: Record<string, string> = {
   'nfc.retired': 'Retirado',
 }
 
+const countsTowardOrder = (status: NfcAssetStatus) => ['reserved', 'programmed', 'assigned', 'delivered'].includes(status)
+
 export function NfcAssetEditor() {
   const { id } = useParams()
   const [asset, setAsset] = useState<AssetRow | null>(null)
@@ -86,7 +88,10 @@ export function NfcAssetEditor() {
 
   useEffect(() => { void load() }, [id])
 
-  const visibleItems = useMemo(() => orderId ? items.filter(item => item.order_id === orderId) : [], [items, orderId])
+  const visibleItems = useMemo(
+    () => orderId ? items.filter(item => item.order_id === orderId && item.item_type === 'nfc_card') : [],
+    [items, orderId],
+  )
   const transitions = asset ? nextNfcStatuses(asset.status) : []
 
   const saveDetails = async () => {
@@ -97,6 +102,9 @@ export function NfcAssetEditor() {
       const normalizedUid = normalizeNfcUid(uid)
       const cost = purchaseCost.trim() === '' ? null : Number(purchaseCost)
       if (cost !== null && (!Number.isFinite(cost) || cost < 0)) throw new Error('Costo inválido.')
+      if (orderId && countsTowardOrder(asset.status) && !orderItemId) {
+        throw new Error('Selecciona el Order item NFC que esta unidad cubre.')
+      }
       const { error: updateError } = await supabase.from('oxxen_connect_nfc_assets').update({
         uid: normalizedUid,
         order_id: orderId || null,
@@ -107,7 +115,7 @@ export function NfcAssetEditor() {
         purchase_cost: cost,
         notes: notes.trim() || null,
       }).eq('id', asset.id)
-      if (updateError) throw new Error('No se pudieron guardar los cambios. Verifica permisos, MFA, UID y relaciones.')
+      if (updateError) throw new Error(updateError.message || 'No se pudieron guardar los cambios. Verifica permisos, MFA, UID y relaciones.')
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo actualizar el activo NFC.')
@@ -118,18 +126,25 @@ export function NfcAssetEditor() {
 
   const changeStatus = async (next: NfcAssetStatus) => {
     if (!asset || !canTransitionNfcStatus(asset.status, next) || asset.status === next) return
-    setSaving(true)
     setError('')
+    if (next === 'reserved' && (!orderId || !orderItemId)) {
+      setError('Para reservar esta unidad selecciona primero el Pedido y su Order item NFC.')
+      return
+    }
+    setSaving(true)
     const patch: Record<string, string | null> = { status: next }
     if (next === 'available') {
       patch.order_id = null
       patch.order_item_id = null
       patch.card_id = null
     }
-    if (next === 'reserved') patch.order_id = orderId || null
+    if (next === 'reserved') {
+      patch.order_id = orderId
+      patch.order_item_id = orderItemId
+    }
     if (next === 'assigned') patch.card_id = cardId || null
     const { error: updateError } = await supabase.from('oxxen_connect_nfc_assets').update(patch).eq('id', asset.id)
-    if (updateError) setError('No se pudo cambiar el estado. Revisa pedido, tarjeta, transición y permisos.')
+    if (updateError) setError(updateError.message || 'No se pudo cambiar el estado. Revisa pedido, tarjeta, transición y permisos.')
     else await load()
     setSaving(false)
   }
@@ -176,7 +191,7 @@ export function NfcAssetEditor() {
         <h2>Asignaciones</h2>
         <div className="grid-3">
           <label className="field"><span>Pedido</span><select value={orderId} onChange={e=>{ setOrderId(e.target.value); setOrderItemId('') }}><option value="">Sin pedido</option>{orders.map(order=><option key={order.id} value={order.id}>{order.order_code}</option>)}</select></label>
-          <label className="field"><span>Order item</span><select value={orderItemId} onChange={e=>setOrderItemId(e.target.value)} disabled={!orderId}><option value="">Sin item</option>{visibleItems.map(item=><option key={item.id} value={item.id}>{item.description || item.item_type} · x{item.quantity}</option>)}</select></label>
+          <label className="field"><span>Order item NFC</span><select value={orderItemId} onChange={e=>setOrderItemId(e.target.value)} disabled={!orderId}><option value="">Selecciona un item NFC</option>{visibleItems.map(item=><option key={item.id} value={item.id}>{item.description || item.item_type} · x{item.quantity}</option>)}</select><small>Solo se muestran items de tipo Tarjeta NFC del pedido seleccionado.</small></label>
           <label className="field"><span>Tarjeta digital</span><select value={cardId} onChange={e=>setCardId(e.target.value)}><option value="">Sin tarjeta</option>{cards.map(card=><option key={card.id} value={card.id}>{card.full_name} · {card.public_id.slice(0,8)}…</option>)}</select></label>
         </div>
         {asset.order && <div className="nfc-note"><strong>Pedido asociado</strong><p><Link className="linkish" to={`/admin/pedidos/${asset.order.id}`}>{asset.order.order_code}</Link></p></div>}

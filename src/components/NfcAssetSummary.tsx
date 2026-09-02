@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { NFC_CHIP_LABELS, NFC_STATUS_LABELS, validateBulkNfcQuantity } from '../lib/nfc'
+import { calculateNfcCoverage, NFC_CHIP_LABELS, NFC_STATUS_LABELS, validateBulkNfcQuantity } from '../lib/nfc'
 import { supabase } from '../lib/supabase'
 import type { NfcAssetRecord } from '../types'
 
@@ -59,17 +59,34 @@ export function NfcAssetSummary({ orderId, cardId, title = 'NFC físicos', allow
     delivered: assets.filter(asset => asset.status === 'delivered').length,
   }), [assets])
 
+  const coverage = useMemo(
+    () => calculateNfcCoverage(requested, assets.map(asset => asset.status)),
+    [requested, assets],
+  )
+
+  useEffect(() => {
+    if (coverage.pending > 0) {
+      setReserveQuantity(current => Math.min(Math.max(1, current), coverage.pending))
+    } else {
+      setReserveQuantity(1)
+    }
+  }, [coverage.pending])
+
   const reserve = async () => {
     if (!orderId) return
     setReserving(true); setError('')
     try {
+      if (coverage.pending <= 0) throw new Error('La reserva NFC de este pedido ya está completa.')
       validateBulkNfcQuantity(reserveQuantity)
+      if (reserveQuantity > coverage.pending) {
+        throw new Error(`Solo faltan ${coverage.pending} NFC por cubrir en este pedido.`)
+      }
       const { error: reserveError } = await supabase.rpc('oxxen_connect_reserve_nfc_assets', {
         p_order_id: orderId,
         p_quantity: reserveQuantity,
         p_order_item_id: null,
       })
-      if (reserveError) throw new Error('No se pudo reservar inventario. Verifica disponibilidad, permisos y MFA.')
+      if (reserveError) throw new Error(reserveError.message || 'No se pudo reservar inventario. Verifica disponibilidad, permisos y MFA.')
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo reservar inventario NFC.')
@@ -81,8 +98,13 @@ export function NfcAssetSummary({ orderId, cardId, title = 'NFC físicos', allow
   return (
     <section className="panel form-section">
       <div className="panel-title"><div><h2>{title}</h2><small>Pedido → item → NFC físico → card digital. El UID nunca sustituye el public_id.</small></div><Link className="ghost-button" to="/admin/inventario-nfc">Ver inventario</Link></div>
-      {orderId && <div className="mini-kpi-grid"><div><span>Solicitados</span><strong>{requested}</strong></div><div><span>Reservados</span><strong>{counts.reserved}</strong></div><div><span>Programados</span><strong>{counts.programmed}</strong></div><div><span>Asignados</span><strong>{counts.assigned}</strong></div><div><span>Entregados</span><strong>{counts.delivered}</strong></div></div>}
-      {allowReserve && orderId && <div className="button-row"><input style={{ maxWidth: 120 }} type="number" min="1" max="500" value={reserveQuantity} onChange={e=>setReserveQuantity(Number(e.target.value))}/><button className="ghost-button" disabled={reserving} onClick={()=>void reserve()}>{reserving ? 'Reservando...' : 'Reservar disponibles'}</button></div>}
+      {orderId && <div className="mini-kpi-grid"><div><span>Solicitados</span><strong>{coverage.requested}</strong></div><div><span>Cubiertos</span><strong>{coverage.covered}</strong></div><div><span>Pendientes</span><strong>{coverage.pending}</strong></div><div><span>Reservados</span><strong>{counts.reserved}</strong></div><div><span>Programados</span><strong>{counts.programmed}</strong></div><div><span>Asignados</span><strong>{counts.assigned}</strong></div><div><span>Entregados</span><strong>{counts.delivered}</strong></div></div>}
+
+      {coverage.overbooked > 0 && <div className="error-box">Hay {coverage.overbooked} NFC por encima de lo solicitado. No reserves más unidades hasta corregir esa inconsistencia.</div>}
+
+      {allowReserve && orderId && coverage.requested === 0 && <p>Este pedido no solicita tarjetas NFC.</p>}
+      {allowReserve && orderId && coverage.requested > 0 && coverage.pending === 0 && coverage.overbooked === 0 && <p><span className="status-pill active">Reserva completa: {coverage.covered}/{coverage.requested}</span></p>}
+      {allowReserve && orderId && coverage.pending > 0 && <div className="button-row"><input aria-label="Cantidad NFC a reservar" style={{ maxWidth: 120 }} type="number" min="1" max={coverage.pending} value={reserveQuantity} onChange={e=>setReserveQuantity(Number(e.target.value))}/><button className="ghost-button" disabled={reserving} onClick={()=>void reserve()}>{reserving ? 'Reservando...' : `Reservar disponibles (${coverage.pending} pendientes)`}</button></div>}
       {error && <div className="error-box">{error}</div>}
       {assets.length === 0 ? <p>No hay activos NFC asociados todavía.</p> : <div className="table-wrap"><table><thead><tr><th>Código</th><th>Chip</th><th>UID</th><th>Estado</th><th>Order item</th><th>Card digital</th></tr></thead><tbody>{assets.map(asset => <tr key={asset.id}><td><Link className="linkish" to={`/admin/inventario-nfc/${asset.id}`}>{asset.asset_code}</Link></td><td>{NFC_CHIP_LABELS[asset.chip_type]}</td><td><code>{asset.uid || '—'}</code></td><td>{NFC_STATUS_LABELS[asset.status]}</td><td>{asset.order_item ? (asset.order_item.description || asset.order_item.item_type) : '—'}</td><td>{asset.card ? <Link className="linkish" to={`/admin/tarjetas/${asset.card.id}`} title={`public_id: ${asset.card.public_id}`}>{asset.card.full_name}</Link> : '—'}</td></tr>)}</tbody></table></div>}
     </section>

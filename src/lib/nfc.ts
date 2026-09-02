@@ -2,6 +2,7 @@ import type { AdminRole, NfcAssetStatus, NfcChipType } from '../types'
 
 export const NFC_CHIP_TYPES: NfcChipType[] = ['NTAG213', 'NTAG215', 'NTAG216', 'NTAG424_DNA', 'OTHER']
 export const NFC_ASSET_STATUSES: NfcAssetStatus[] = ['available', 'reserved', 'programmed', 'assigned', 'delivered', 'defective', 'lost', 'retired']
+export const NFC_COVERAGE_STATUSES: NfcAssetStatus[] = ['reserved', 'programmed', 'assigned', 'delivered']
 
 export const NFC_CHIP_LABELS: Record<NfcChipType, string> = {
   NTAG213: 'NTAG213',
@@ -67,6 +68,17 @@ export function nextNfcStatuses(from: NfcAssetStatus) {
 export function validateBulkNfcQuantity(quantity: number) {
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > 500) throw new Error('La cantidad debe estar entre 1 y 500.')
   return quantity
+}
+
+export function calculateNfcCoverage(requested: number, statuses: NfcAssetStatus[]) {
+  const normalizedRequested = Number.isFinite(requested) ? Math.max(0, Math.trunc(requested)) : 0
+  const covered = statuses.filter(status => NFC_COVERAGE_STATUSES.includes(status)).length
+  return {
+    requested: normalizedRequested,
+    covered,
+    pending: Math.max(normalizedRequested - covered, 0),
+    overbooked: Math.max(covered - normalizedRequested, 0),
+  }
 }
 
 export function canReadNfcInventory(role: AdminRole) {
